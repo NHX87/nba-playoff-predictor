@@ -1,0 +1,9 @@
+conference,high_seed,high_team,low_seed,low_team,upset_risk,favorite,favorite_win_prob,predicted_winner
+West,4,DEN,5,MIN,0.9653,MIN,0.9653,MIN
+West,1,OKC,8,PHX,0.9598,PHX,0.9598,PHX
+East,4,CLE,5,TOR,0.8694,TOR,0.8694,TOR
+East,2,BOS,7,MIA,0.4861,BOS,0.5139,BOS
+West,2,SAS,7,GSW,0.4551,SAS,0.5449,SAS
+East,3,NYK,6,PHI,0.0966,NYK,0.9034,NYK
+East,1,DET,8,ORL,0.0296,DET,0.9704,DET
+West,3,HOU,6,LAL,0.0127,HOU,0.9873,HOU

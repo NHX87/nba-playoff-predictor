@@ -1,0 +1,54 @@
+{
+  "target_column_used": "playoff_rounds_reached",
+  "n_rows_total": 240,
+  "n_rows_train": 192,
+  "n_rows_validation": 48,
+  "n_features": 5,
+  "features_used": [
+    "rs_vs_top_teams_win_pct",
+    "rs_net_rating",
+    "rs_close_game_win_pct",
+    "rs_fta",
+    "rs_efg_pct"
+  ],
+  "train_c_index": 0.8138888888888889,
+  "validation_c_index": 0.7176470588235294,
+  "holdout_seasons": [
+    "2022-23",
+    "2023-24",
+    "2024-25"
+  ],
+  "season_sanity_checks": [
+    {
+      "season": "2022-23",
+      "champion": "DEN",
+      "champion_pred_rank": 2,
+      "champion_in_top_3": true,
+      "champion_in_top_5": true,
+      "teams_in_season": 16
+    },
+    {
+      "season": "2023-24",
+      "champion": "BOS",
+      "champion_pred_rank": 1,
+      "champion_in_top_3": true,
+      "champion_in_top_5": true,
+      "teams_in_season": 16
+    },
+    {
+      "season": "2024-25",
+      "champion": "OKC",
+      "champion_pred_rank": 1,
+      "champion_in_top_3": true,
+      "champion_in_top_5": true,
+      "teams_in_season": 16
+    }
+  ],
+  "coefficients": {
+    "rs_vs_top_teams_win_pct": -1.633403117214564,
+    "rs_net_rating": -0.18871379555297293,
+    "rs_close_game_win_pct": -1.7415014917111198,
+    "rs_fta": 0.04341327771005175,
+    "rs_efg_pct": -5.283252767102522
+  }
+}

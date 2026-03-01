@@ -1,0 +1,37 @@
+{
+  "n_series": 15,
+  "n_rows_total": 30,
+  "n_rows_train": 24,
+  "n_rows_validation": 6,
+  "holdout_seasons": [
+    "2022-23",
+    "2023-24",
+    "2024-25"
+  ],
+  "team_feature_columns": [
+    "rs_vs_top_teams_win_pct",
+    "rs_net_rating",
+    "rs_close_game_win_pct",
+    "rs_fta",
+    "rs_efg_pct"
+  ],
+  "delta_feature_columns": [
+    "delta_rs_vs_top_teams_win_pct",
+    "delta_rs_net_rating",
+    "delta_rs_close_game_win_pct",
+    "delta_rs_fta",
+    "delta_rs_efg_pct"
+  ],
+  "train_metrics": {
+    "accuracy": 0.75,
+    "roc_auc": 0.8819444444444444,
+    "log_loss": 0.4561968621578743,
+    "brier": 0.14743685208692325
+  },
+  "validation_metrics": {
+    "accuracy": 0.6666666666666666,
+    "roc_auc": 0.888888888888889,
+    "log_loss": 0.4878166402772834,
+    "brier": 0.15784731792526907
+  }
+}

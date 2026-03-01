@@ -1,0 +1,6 @@
+step,added_feature,val_c_index,champ_top3_rate,champ_top5_rate,n_train,n_val,coef
+1,rs_vs_top_teams_win_pct,0.6954248366013072,1.0,1.0,192,48,{'rs_vs_top_teams_win_pct': -3.9911635860252646}
+2,rs_efg_pct,0.7098039215686275,1.0,1.0,192,48,"{'rs_vs_top_teams_win_pct': -3.531054846738248, 'rs_efg_pct': -9.068284534336234}"
+3,rs_close_game_win_pct,0.7150326797385621,1.0,1.0,192,48,"{'rs_vs_top_teams_win_pct': -3.320301306029824, 'rs_efg_pct': -9.191079310707709, 'rs_close_game_win_pct': -0.9002450868265829}"
+4,rs_fta,0.7189542483660131,1.0,1.0,192,48,"{'rs_vs_top_teams_win_pct': -3.348777328054712, 'rs_efg_pct': -8.964523149719398, 'rs_close_game_win_pct': -0.8996741034501305, 'rs_fta': 0.022780876281056506}"
+5,rs_ts_pct,0.722875816993464,1.0,1.0,192,48,"{'rs_vs_top_teams_win_pct': -3.275259543847542, 'rs_efg_pct': 1.3722370376661, 'rs_close_game_win_pct': -0.9335478872159688, 'rs_fta': 0.0394480570410503, 'rs_ts_pct': -12.899718217059826}"
