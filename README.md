@@ -108,6 +108,34 @@ Evaluation tables:
 - `loyo_season_summary`
 - `loyo_series_predictions`
 
+## Model Coefficients
+
+### Survival Model (CoxPH)
+
+Negative coefficient = lower elimination hazard = goes deeper in playoffs.
+Trained on 192 team-seasons (2010-11 → 2021-22), 5 RS-only features.
+
+| Feature | Coefficient | Interpretation |
+| --- | --- | --- |
+| `rs_efg_pct` | −5.283 | Strongest signal — efficient shooting teams survive longer |
+| `rs_close_game_win_pct` | −1.741 | Clutch performance under pressure |
+| `rs_vs_top_teams_win_pct` | −1.633 | Proven against elite competition |
+| `rs_net_rating` | −0.189 | Overall point differential |
+| `rs_fta` | +0.043 | Higher foul-drawing slightly increases elimination risk |
+
+### Matchup Model (Logistic Regression)
+
+Coefficient on delta features (team_a − team_b). Positive = team_a advantage increases win probability.
+Trained on 360 symmetric series rows (12 seasons × 15 series × 2).
+
+| Feature (delta) | Coefficient | Interpretation |
+| --- | --- | --- |
+| `delta_rs_net_rating` | +0.867 | Strongest matchup signal — point differential edge |
+| `delta_rs_efg_pct` | +0.539 | Shooting efficiency advantage |
+| `delta_rs_vs_top_teams_win_pct` | +0.469 | Strength-of-schedule edge |
+| `delta_rs_close_game_win_pct` | +0.297 | Clutch game edge |
+| `delta_rs_fta` | −0.275 | Higher FTA team faces slightly worse odds |
+
 ## Model Accuracy — LOYO Backtest
 
 Leave-one-year-out cross-validation across all 15 seasons (2010-11 → 2024-25).
