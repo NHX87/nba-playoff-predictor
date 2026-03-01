@@ -1,8 +1,8 @@
 {
-  "n_series": 15,
-  "n_rows_total": 30,
-  "n_rows_train": 24,
-  "n_rows_validation": 6,
+  "n_series": 225,
+  "n_rows_total": 450,
+  "n_rows_train": 360,
+  "n_rows_validation": 90,
   "holdout_seasons": [
     "2022-23",
     "2023-24",
@@ -23,15 +23,15 @@
     "delta_rs_efg_pct"
   ],
   "train_metrics": {
-    "accuracy": 0.75,
-    "roc_auc": 0.8819444444444444,
-    "log_loss": 0.4561968621578743,
-    "brier": 0.14743685208692325
+    "accuracy": 0.7666666666666667,
+    "roc_auc": 0.839320987654321,
+    "log_loss": 0.4920228760954278,
+    "brier": 0.16343604396605263
   },
   "validation_metrics": {
-    "accuracy": 0.6666666666666666,
-    "roc_auc": 0.888888888888889,
-    "log_loss": 0.4878166402772834,
-    "brier": 0.15784731792526907
+    "accuracy": 0.7333333333333333,
+    "roc_auc": 0.7511111111111111,
+    "log_loss": 0.6190033153951175,
+    "brier": 0.21238390806398888
   }
 }

@@ -56,8 +56,12 @@ def _load_series_outcomes(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
                 TEAM_ID,
                 TEAM_ABBR,
                 WL,
-                CAST(SUBSTR(CAST(GAME_ID AS VARCHAR), 4, 2) AS INT) AS round_code,
-                SUBSTR(CAST(GAME_ID AS VARCHAR), 6, 3) AS series_num
+                -- GAME_ID format: 004 YY RRR S G  (1-indexed positions)
+                -- positions 6-8 = round identifier (001=R1, 002=R2, 003=CF, 004=Finals)
+                -- position  9   = series index within round (0-7)
+                -- position  10  = game number within series (1-7)
+                CAST(SUBSTR(CAST(GAME_ID AS VARCHAR), 6, 3) AS INT) AS round_code,
+                SUBSTR(CAST(GAME_ID AS VARCHAR), 9, 1) AS series_id
             FROM playoffs
             WHERE GAME_ID IS NOT NULL
               AND CAST(GAME_ID AS VARCHAR) LIKE '004%'
@@ -66,7 +70,7 @@ def _load_series_outcomes(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
             SELECT
                 SEASON,
                 round_code,
-                series_num,
+                series_id,
                 TEAM_ID,
                 TEAM_ABBR,
                 SUM(CASE WHEN WL = 'W' THEN 1 ELSE 0 END) AS wins
@@ -76,7 +80,7 @@ def _load_series_outcomes(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
         SELECT
             SEASON,
             round_code,
-            series_num,
+            series_id,
             MAX(CASE WHEN wins = 4 THEN TEAM_ID END) AS winner_team_id,
             MAX(CASE WHEN wins = 4 THEN TEAM_ABBR END) AS winner_team_abbr,
             MAX(CASE WHEN wins < 4 THEN TEAM_ID END) AS loser_team_id,
@@ -85,7 +89,7 @@ def _load_series_outcomes(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
         GROUP BY 1, 2, 3
         HAVING COUNT(*) = 2
            AND MAX(wins) = 4
-        ORDER BY SEASON, round_code, series_num
+        ORDER BY SEASON, round_code, series_id
         """
     ).df()
 
@@ -135,7 +139,7 @@ def _build_training_frame(series_df: pd.DataFrame, team_feats: pd.DataFrame, fea
         base = {
             "SEASON": r.SEASON,
             "round_code": int(r.round_code),
-            "series_num": str(r.series_num),
+            "series_id": str(r.series_id),
         }
 
         delta = {}
@@ -238,7 +242,7 @@ def train_matchup_model() -> dict[str, Any]:
         "brier": float(brier_score_loss(y_val, p_val)),
     }
 
-    val_out = val_df[["SEASON", "round_code", "series_num", "team_a", "team_b", "target_team_a_wins"]].copy()
+    val_out = val_df[["SEASON", "round_code", "series_id", "team_a", "team_b", "target_team_a_wins"]].copy()
     val_out["p_team_a_wins"] = p_val
     val_out["pred_team_a_wins"] = (val_out["p_team_a_wins"] >= 0.5).astype(int)
     val_out["predicted_winner"] = val_out.apply(

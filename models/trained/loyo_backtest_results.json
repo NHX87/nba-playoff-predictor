@@ -1,0 +1,187 @@
+{
+  "features_used": [
+    "rs_vs_top_teams_win_pct",
+    "rs_net_rating",
+    "rs_close_game_win_pct",
+    "rs_fta",
+    "rs_efg_pct"
+  ],
+  "n_seasons": 15,
+  "seasons_range": "2010-11 \u2192 2024-25",
+  "survival": {
+    "n_seasons_evaluated": 15,
+    "mean_c_index": 0.7961,
+    "std_c_index": 0.0737,
+    "min_c_index": 0.6353,
+    "max_c_index": 0.9059,
+    "champion_top1_rate": 0.4667,
+    "champion_top3_rate": 0.8,
+    "champion_top5_rate": 1.0,
+    "mean_champion_rank": 2.27
+  },
+  "matchup": {
+    "n_series_evaluated": 225,
+    "overall_accuracy": 0.7289,
+    "mean_brier_score": 0.1826,
+    "roc_auc": 0.8022,
+    "by_round": {
+      "First Round": {
+        "n_series": 120,
+        "accuracy": 0.7667,
+        "mean_brier": 0.1547
+      },
+      "Conference Semifinals": {
+        "n_series": 60,
+        "accuracy": 0.65,
+        "mean_brier": 0.2346
+      },
+      "Conference Finals": {
+        "n_series": 30,
+        "accuracy": 0.7,
+        "mean_brier": 0.2021
+      },
+      "NBA Finals": {
+        "n_series": 15,
+        "accuracy": 0.8,
+        "mean_brier": 0.1587
+      }
+    }
+  },
+  "per_season": [
+    {
+      "season": "2010-11",
+      "n_teams": 16,
+      "c_index": 0.6824,
+      "champion": "DAL",
+      "champion_pred_rank": 5,
+      "champion_in_top_3": false,
+      "champion_in_top_5": true
+    },
+    {
+      "season": "2011-12",
+      "n_teams": 16,
+      "c_index": 0.8118,
+      "champion": "MIA",
+      "champion_pred_rank": 3,
+      "champion_in_top_3": true,
+      "champion_in_top_5": true
+    },
+    {
+      "season": "2012-13",
+      "n_teams": 16,
+      "c_index": 0.7059,
+      "champion": "MIA",
+      "champion_pred_rank": 1,
+      "champion_in_top_3": true,
+      "champion_in_top_5": true
+    },
+    {
+      "season": "2013-14",
+      "n_teams": 16,
+      "c_index": 0.8118,
+      "champion": "SAS",
+      "champion_pred_rank": 1,
+      "champion_in_top_3": true,
+      "champion_in_top_5": true
+    },
+    {
+      "season": "2014-15",
+      "n_teams": 16,
+      "c_index": 0.8235,
+      "champion": "GSW",
+      "champion_pred_rank": 1,
+      "champion_in_top_3": true,
+      "champion_in_top_5": true
+    },
+    {
+      "season": "2015-16",
+      "n_teams": 16,
+      "c_index": 0.8235,
+      "champion": "CLE",
+      "champion_pred_rank": 3,
+      "champion_in_top_3": true,
+      "champion_in_top_5": true
+    },
+    {
+      "season": "2016-17",
+      "n_teams": 16,
+      "c_index": 0.9059,
+      "champion": "GSW",
+      "champion_pred_rank": 1,
+      "champion_in_top_3": true,
+      "champion_in_top_5": true
+    },
+    {
+      "season": "2017-18",
+      "n_teams": 16,
+      "c_index": 0.8353,
+      "champion": "GSW",
+      "champion_pred_rank": 1,
+      "champion_in_top_3": true,
+      "champion_in_top_5": true
+    },
+    {
+      "season": "2018-19",
+      "n_teams": 16,
+      "c_index": 0.8941,
+      "champion": "TOR",
+      "champion_pred_rank": 3,
+      "champion_in_top_3": true,
+      "champion_in_top_5": true
+    },
+    {
+      "season": "2019-20",
+      "n_teams": 16,
+      "c_index": 0.8118,
+      "champion": "LAL",
+      "champion_pred_rank": 2,
+      "champion_in_top_3": true,
+      "champion_in_top_5": true
+    },
+    {
+      "season": "2020-21",
+      "n_teams": 16,
+      "c_index": 0.8235,
+      "champion": "MIL",
+      "champion_pred_rank": 5,
+      "champion_in_top_3": false,
+      "champion_in_top_5": true
+    },
+    {
+      "season": "2021-22",
+      "n_teams": 16,
+      "c_index": 0.8235,
+      "champion": "GSW",
+      "champion_pred_rank": 4,
+      "champion_in_top_3": false,
+      "champion_in_top_5": true
+    },
+    {
+      "season": "2022-23",
+      "n_teams": 16,
+      "c_index": 0.6353,
+      "champion": "DEN",
+      "champion_pred_rank": 2,
+      "champion_in_top_3": true,
+      "champion_in_top_5": true
+    },
+    {
+      "season": "2023-24",
+      "n_teams": 16,
+      "c_index": 0.7176,
+      "champion": "BOS",
+      "champion_pred_rank": 1,
+      "champion_in_top_3": true,
+      "champion_in_top_5": true
+    },
+    {
+      "season": "2024-25",
+      "n_teams": 16,
+      "c_index": 0.8353,
+      "champion": "OKC",
+      "champion_pred_rank": 1,
+      "champion_in_top_3": true,
+      "champion_in_top_5": true
+    }
+  ]
+}

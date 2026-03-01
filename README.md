@@ -8,6 +8,7 @@ End-to-end system for ingesting NBA data, engineering playoff-specific features,
 - Feature engineering modules (`pipeline/features`) that build model-ready tables in DuckDB.
 - Modeling modules (`pipeline/models`) for survival training + evaluation.
 - App layer (`app`) for interactive UI and AI analyst chat.
+- Portfolio layer (`portfolio`) for a public-facing project case-study website.
 - Local analytical warehouse (`data/processed/nba.duckdb`) as the system of record.
 
 ## Current End-to-End Flow
@@ -55,6 +56,10 @@ python -m pipeline.run_pipeline --skip-fetch --with-model
 
 # Run app
 streamlit run app/main.py
+
+# Run portfolio site
+python -m http.server
+# open http://localhost:8000/portfolio/index.html
 ```
 
 ## Documentation Map
@@ -65,6 +70,7 @@ streamlit run app/main.py
 - Modeling: [pipeline/models/README.md](/Users/nick/Downloads/nba_playoff_predictor/pipeline/models/README.md)
 - Agent layer: [pipeline/agent/README.md](/Users/nick/Downloads/nba_playoff_predictor/pipeline/agent/README.md)
 - App layer: [app/README.md](/Users/nick/Downloads/nba_playoff_predictor/app/README.md)
+- Portfolio site: [portfolio/README.md](/Users/nick/Downloads/nba_playoff_predictor/portfolio/README.md)
 - Trained artifacts: [models/README.md](/Users/nick/Downloads/nba_playoff_predictor/models/README.md)
 
 ## Key Tables
@@ -97,6 +103,48 @@ App-ready tables:
 - `app_series_predictions_current`
 - `app_playoff_field_current`
 - `app_play_in_current`
+
+Evaluation tables:
+- `loyo_season_summary`
+- `loyo_series_predictions`
+
+## Model Accuracy — LOYO Backtest
+
+Leave-one-year-out cross-validation across all 15 seasons (2010-11 → 2024-25).
+Each fold trains on 14 seasons and evaluates on the 1 held-out season.
+225 total series evaluated. Full results: [`models/trained/loyo_backtest_results.json`](models/trained/loyo_backtest_results.json)
+
+### Survival Model (CoxPH) — playoff depth ranking
+
+| Metric | Value |
+| --- | --- |
+| Mean C-index | 0.796 ±0.074 |
+| C-index range | 0.635 – 0.906 |
+| Champion predicted #1 | 46.7% (7/15 seasons) |
+| Champion in top 3 | 80.0% (12/15 seasons) |
+| Champion in top 5 | 100% (15/15 seasons) |
+| Mean champion rank | 2.3 / 16 |
+
+### Matchup Model (Logistic Regression) — series winner prediction
+
+| Metric | Value |
+| --- | --- |
+| Overall series accuracy | 72.9% (225 series) |
+| ROC-AUC | 0.802 |
+| Mean Brier score | 0.183 (random baseline = 0.25) |
+
+| Round | Accuracy | n |
+| --- | --- | --- |
+| First Round | 76.7% | 120 |
+| Conference Semifinals | 65.0% | 60 |
+| Conference Finals | 70.0% | 30 |
+| NBA Finals | 80.0% | 15 |
+
+Run the backtest:
+
+```bash
+python -m pipeline.models.loyo_backtest
+```
 
 ## Health Checks
 

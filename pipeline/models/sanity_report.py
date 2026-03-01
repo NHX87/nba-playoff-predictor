@@ -20,6 +20,7 @@ Run:
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import duckdb
@@ -185,12 +186,67 @@ def _sensitivity_sweep() -> pd.DataFrame:
     return merged
 
 
+def _load_loyo_results() -> dict | None:
+    """Load LOYO backtest results if available."""
+    loyo_path = ARTIFACT_DIR / "loyo_backtest_results.json"
+    if not loyo_path.exists():
+        return None
+    with loyo_path.open(encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _loyo_summary_md(loyo: dict) -> str:
+    """Render LOYO results as a markdown summary block."""
+    s = loyo.get("survival", {})
+    m = loyo.get("matchup", {})
+    seasons = loyo.get("n_seasons", "?")
+    rng = loyo.get("seasons_range", "?")
+
+    lines = [
+        f"**Seasons evaluated:** {seasons} ({rng})  ",
+        f"**Features:** {', '.join(loyo.get('features_used', []))}",
+        "",
+        "### Survival Model (CoxPH)",
+        f"| Metric | Value |",
+        f"| --- | --- |",
+        f"| Mean C-index | {s.get('mean_c_index', '?')} ±{s.get('std_c_index', '?')} |",
+        f"| C-index range | {s.get('min_c_index', '?')} – {s.get('max_c_index', '?')} |",
+        f"| Champion top-1 rate | {s.get('champion_top1_rate', 0):.1%} |",
+        f"| Champion top-3 rate | {s.get('champion_top3_rate', 0):.1%} |",
+        f"| Champion top-5 rate | {s.get('champion_top5_rate', 0):.1%} |",
+        f"| Mean champion rank | {s.get('mean_champion_rank', '?')} / 16 |",
+        "",
+        "### Matchup Model (Logistic Regression)",
+        f"| Metric | Value |",
+        f"| --- | --- |",
+        f"| Series accuracy | {m.get('overall_accuracy', 0):.1%} ({m.get('n_series_evaluated', '?')} series) |",
+        f"| Mean Brier score | {m.get('mean_brier_score', '?')} (random baseline = 0.25) |",
+        f"| ROC-AUC | {m.get('roc_auc', '?')} |",
+    ]
+
+    by_round = m.get("by_round", {})
+    if by_round:
+        lines += ["", "**By round:**", "| Round | Accuracy | Brier | n |", "| --- | --- | --- | --- |"]
+        for label, rd in by_round.items():
+            lines.append(f"| {label} | {rd['accuracy']:.1%} | {rd['mean_brier']:.4f} | {rd['n_series']} |")
+
+    per_season = loyo.get("per_season", [])
+    if per_season:
+        lines += ["", "**Per-season champion ranks:**", "| Season | Champion | Rank | Top-3 | C-index |", "| --- | --- | --- | --- | --- |"]
+        for r in per_season:
+            top3 = "✓" if r.get("champion_in_top_3") else "✗"
+            lines.append(f"| {r['season']} | {r.get('champion', '?')} | {r.get('champion_pred_rank', '?')} | {top3} | {r.get('c_index', 0):.3f} |")
+
+    return "\n".join(lines)
+
+
 def generate_sanity_report() -> None:
     series_df, odds_df = _load_app_tables()
 
     upset_df = _upset_risks(series_df)
     gap_df = _seed_vs_odds_gap(odds_df)
     sens_df = _sensitivity_sweep()
+    loyo = _load_loyo_results()
 
     upset_df.to_csv(UPSET_PATH, index=False)
     gap_df.to_csv(GAP_PATH, index=False)
@@ -213,8 +269,16 @@ def generate_sanity_report() -> None:
         ]
     ].head(12)
 
+    loyo_section = (
+        f"## 0) LOYO Backtest — True Out-of-Sample Accuracy\n\n"
+        f"Leave-one-year-out cross-validation across all historical seasons.\n"
+        f"Each fold trains on 14 seasons and evaluates on the held-out season.\n\n"
+        f"{_loyo_summary_md(loyo)}\n"
+    ) if loyo else ""
+
     report = f"""# Model Sanity Report ({CURRENT_SEASON_STR})
 
+{loyo_section}
 ## 1) Strongest Round-1 Upset Risks
 
 Upset risk is defined as `P(low seed beats high seed)`.

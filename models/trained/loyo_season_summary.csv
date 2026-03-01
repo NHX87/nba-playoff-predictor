@@ -1,0 +1,16 @@
+season,n_teams,c_index,champion,champion_pred_rank,champion_in_top_3,champion_in_top_5
+2010-11,16,0.6824,DAL,5,False,True
+2011-12,16,0.8118,MIA,3,True,True
+2012-13,16,0.7059,MIA,1,True,True
+2013-14,16,0.8118,SAS,1,True,True
+2014-15,16,0.8235,GSW,1,True,True
+2015-16,16,0.8235,CLE,3,True,True
+2016-17,16,0.9059,GSW,1,True,True
+2017-18,16,0.8353,GSW,1,True,True
+2018-19,16,0.8941,TOR,3,True,True
+2019-20,16,0.8118,LAL,2,True,True
+2020-21,16,0.8235,MIL,5,False,True
+2021-22,16,0.8235,GSW,4,False,True
+2022-23,16,0.6353,DEN,2,True,True
+2023-24,16,0.7176,BOS,1,True,True
+2024-25,16,0.8353,OKC,1,True,True
