@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NBA Playoff Predictor | Portfolio</title>
+    <meta
+      name="description"
+      content="Portfolio site for an end-to-end NBA playoff prediction system with data pipeline, model training, simulation, and analytics app."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="ambient ambient-a"></div>
+    <div class="ambient ambient-b"></div>
+
+    <header class="site-header">
+      <div class="container nav-wrap">
+        <div class="brand">NBA Playoff Predictor</div>
+        <nav class="nav-links">
+          <a href="#overview">Overview</a>
+          <a href="#anatomy">Anatomy</a>
+          <a href="#outputs">Outputs</a>
+          <a href="#launch">Launch</a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero container" id="overview">
+        <p class="eyebrow">Portfolio Case Study</p>
+        <h1>From NBA API to playoff forecast app, fully local and reproducible.</h1>
+        <p class="hero-copy">
+          This project ingests historical + current-season data, engineers playoff-relevant regular-season
+          features, trains survival and matchup models, simulates the bracket, and serves outputs in a
+          polished analytics interface.
+        </p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="http://localhost:8501" target="_blank" rel="noreferrer">Open Analytics App</a>
+          <a class="btn btn-ghost" href="../README.md" target="_blank" rel="noreferrer">Read Technical README</a>
+        </div>
+        <div class="hero-stats">
+          <article>
+            <p class="stat-label">Pipeline Layers</p>
+            <p class="stat-value">4</p>
+          </article>
+          <article>
+            <p class="stat-label">Model Family</p>
+            <p class="stat-value">Survival + Matchup</p>
+          </article>
+          <article>
+            <p class="stat-label">Warehouse</p>
+            <p class="stat-value">DuckDB</p>
+          </article>
+          <article>
+            <p class="stat-label">Frontend</p>
+            <p class="stat-value">Streamlit + Portfolio</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="container cards-grid" aria-label="Project pillars">
+        <article class="glass-card">
+          <h3>Data Engineering</h3>
+          <p>Ingestion scripts load game and player logs, normalize seasons, and validate completeness before modeling.</p>
+        </article>
+        <article class="glass-card">
+          <h3>Feature Layer</h3>
+          <p>Regular-season feature builders create team-level predictors like net rating, efficiency, and top-team performance.</p>
+        </article>
+        <article class="glass-card">
+          <h3>Modeling</h3>
+          <p>Survival model estimates title progression risk; matchup model predicts series outcomes for bracket simulation.</p>
+        </article>
+        <article class="glass-card">
+          <h3>Decision UI</h3>
+          <p>Analytics dashboard highlights title odds, play-in paths, and projected winners with explainability hooks.</p>
+        </article>
+      </section>
+
+      <section class="container" id="anatomy">
+        <div class="section-head">
+          <p class="eyebrow">Project Anatomy</p>
+          <h2>System flow and why this structure scales</h2>
+        </div>
+        <div class="flow-grid">
+          <article><span>1</span><h4>Ingest</h4><p>`pipeline/ingestion/*` pulls raw logs and writes warehouse tables.</p></article>
+          <article><span>2</span><h4>Engineer</h4><p>`pipeline/features/*` builds reusable feature tables with controlled season alignment.</p></article>
+          <article><span>3</span><h4>Train</h4><p>`pipeline/models/*` fits survival + matchup artifacts and exports diagnostics.</p></article>
+          <article><span>4</span><h4>Simulate</h4><p>Current-season bracket and play-in outcomes are Monte Carlo simulated.</p></article>
+          <article><span>5</span><h4>Serve</h4><p>`app/main.py` renders analytics views and an AI analyst chat layer.</p></article>
+        </div>
+      </section>
+
+      <section class="container outputs" id="outputs">
+        <div class="section-head">
+          <p class="eyebrow">Live Artifacts</p>
+          <h2>Snapshot from latest local model run</h2>
+        </div>
+        <div class="outputs-grid">
+          <article class="panel">
+            <h3>Top Championship Odds</h3>
+            <ol id="title-odds-list" class="odds-list">
+              <li><span class="team">Load data</span><span class="prob">--</span></li>
+            </ol>
+          </article>
+          <article class="panel">
+            <h3>Run Metadata</h3>
+            <dl class="meta-list">
+              <div><dt>Season</dt><dd id="meta-season">--</dd></div>
+              <div><dt>Simulations</dt><dd id="meta-sims">--</dd></div>
+              <div><dt>Updated</dt><dd id="meta-updated">--</dd></div>
+            </dl>
+          </article>
+        </div>
+      </section>
+
+      <section class="container" id="launch">
+        <div class="section-head">
+          <p class="eyebrow">Run Locally</p>
+          <h2>Commands to launch the full experience</h2>
+        </div>
+        <div class="code-grid">
+          <article class="panel">
+            <h3>Backend refresh</h3>
+            <pre><code>python -m pipeline.run_pipeline --skip-fetch --with-model
+python -m pipeline.models.predict_current
+python -m pipeline.models.simulation</code></pre>
+          </article>
+          <article class="panel">
+            <h3>Frontend launch</h3>
+            <pre><code>streamlit run app/main.py
+python -m http.server
+# open /portfolio/index.html</code></pre>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container footer-wrap">
+        <p>NBA Playoff Predictor Portfolio</p>
+        <a href="../docs/ARCHITECTURE_RATIONALE.md" target="_blank" rel="noreferrer">Architecture Rationale</a>
+      </div>
+    </footer>
+
+    <script src="./main.js"></script>
+  </body>
+</html>

@@ -33,6 +33,7 @@ import pandas as pd
 
 from config.settings import CURRENT_SEASON_STR, DB_PATH, MONTE_CARLO_RUNS
 from pipeline.models.matchup_model import load_matchup_artifact, predict_matchup_prob
+from pipeline.models.series_length import add_series_length_cols
 
 ARTIFACT_DIR = Path("models/trained")
 ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
@@ -210,6 +211,7 @@ def run_monte_carlo(
     teams = sorted(field_df["TEAM_ABBR"].tolist())
     pair_probs = _build_pair_prob_map(teams, feature_df, artifact)
     deterministic_series = _deterministic_series_predictions(seed_maps, pair_probs)
+    deterministic_series = add_series_length_cols(deterministic_series)
 
     make_second_round = Counter()
     make_conf_finals = Counter()

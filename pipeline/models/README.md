@@ -109,3 +109,17 @@ and publishes app-ready tables:
 ## Next Planned Models
 
 - Historical rolling backtest module
+
+## App Metric Mapping
+
+This mapping is the UI contract between modeling outputs and app surfaces.
+
+- `app_title_odds_current.title_prob`
+  - used as current title odds in Team tab KPI
+  - used as endpoint calibration target for team odds-over-time chart
+- `app_series_predictions_current`
+  - drives bracket shelves in Playoff tab
+  - winner probability shown under each shelf
+  - `p_4_games..p_7_games` / `expected_games` converted to projected series scoreline
+- `app_play_in_current`
+  - drives play-in team cards (projected seed + make-playoffs probability)

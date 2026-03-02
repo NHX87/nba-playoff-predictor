@@ -8,6 +8,7 @@ Ingestion is responsible for moving source API data into local durable storage.
 - [fetch_players.py](/Users/nick/Downloads/nba_playoff_predictor/pipeline/ingestion/fetch_players.py)
 - [load_db.py](/Users/nick/Downloads/nba_playoff_predictor/pipeline/ingestion/load_db.py)
 - [fetch_series.py](/Users/nick/Downloads/nba_playoff_predictor/pipeline/ingestion/fetch_series.py)
+- [fetch_live_scores.py](/Users/nick/Downloads/nba_playoff_predictor/pipeline/ingestion/fetch_live_scores.py)
 - [validate.py](/Users/nick/Downloads/nba_playoff_predictor/pipeline/ingestion/validate.py)
 
 ## Responsibilities
@@ -32,6 +33,9 @@ python -m pipeline.ingestion.load_db
 
 # Build team-level playoff rounds reached
 python -m pipeline.ingestion.fetch_series
+
+# Pull today's live/final/upcoming scoreboard + leaders
+python -m pipeline.ingestion.fetch_live_scores
 
 # Validate data coverage
 python -m pipeline.ingestion.validate

@@ -70,6 +70,7 @@ python -m http.server
 - Modeling: [pipeline/models/README.md](/Users/nick/Downloads/nba_playoff_predictor/pipeline/models/README.md)
 - Agent layer: [pipeline/agent/README.md](/Users/nick/Downloads/nba_playoff_predictor/pipeline/agent/README.md)
 - App layer: [app/README.md](/Users/nick/Downloads/nba_playoff_predictor/app/README.md)
+- UX contract: [docs/UX_SPEC.md](/Users/nick/Downloads/nba_playoff_predictor/docs/UX_SPEC.md)
 - Portfolio site: [portfolio/README.md](/Users/nick/Downloads/nba_playoff_predictor/portfolio/README.md)
 - Trained artifacts: [models/README.md](/Users/nick/Downloads/nba_playoff_predictor/models/README.md)
 

@@ -308,6 +308,122 @@ def compute_team_stats_features() -> pd.DataFrame:
         GROUP BY g.TEAM_ID, g.TEAM_ABBR, g.SEASON
     """).df()
 
+    # --- RS CONTEXT FEATURES ---
+    # Adds schedule/context metrics requested for RS-only modeling:
+    # - opponent strength (SOS proxies)
+    # - rest/travel stress
+    # - home/away splits
+    # - turnover forced rate
+    # - rebound rate
+    rs_context = con.execute("""
+        WITH games AS (
+            SELECT
+                TEAM_ID,
+                TEAM_ABBR,
+                SEASON,
+                GAME_ID,
+                WL,
+                CASE WHEN WL = 'W' THEN 1.0 ELSE 0.0 END AS wl_win,
+                RIGHT(MATCHUP, 3) AS opp_abbr,
+                CASE WHEN MATCHUP LIKE '% vs. %' THEN 1 ELSE 0 END AS is_home,
+                CASE WHEN MATCHUP LIKE '% @ %' THEN 1 ELSE 0 END AS is_away,
+                COALESCE(
+                    TRY_CAST(GAME_DATE AS DATE),
+                    TRY_STRPTIME(GAME_DATE, '%Y-%m-%dT%H:%M:%S'),
+                    TRY_STRPTIME(GAME_DATE, '%b %d, %Y'),
+                    TRY_STRPTIME(GAME_DATE, '%Y-%m-%d')
+                )::DATE AS game_dt,
+                CAST(FGA AS FLOAT) AS fga,
+                CAST(FTA AS FLOAT) AS fta,
+                CAST(OREB AS FLOAT) AS oreb,
+                CAST(TOV AS FLOAT) AS tov,
+                CAST(REB AS FLOAT) AS reb
+            FROM regular_season
+            WHERE CAST(FGA AS FLOAT) > 0
+        ),
+        games_rest AS (
+            SELECT
+                g.*,
+                DATE_DIFF(
+                    'day',
+                    LAG(game_dt) OVER (PARTITION BY TEAM_ID, SEASON ORDER BY game_dt, GAME_ID),
+                    game_dt
+                ) AS rest_days
+            FROM games g
+        ),
+        team_records AS (
+            SELECT
+                SEASON,
+                TEAM_ABBR,
+                AVG(CASE WHEN WL = 'W' THEN 1.0 ELSE 0.0 END) AS team_win_pct,
+                SUM(CAST(PTS AS FLOAT)) / NULLIF(
+                    SUM(
+                        CAST(FGA AS FLOAT)
+                        + 0.44 * CAST(FTA AS FLOAT)
+                        - CAST(OREB AS FLOAT)
+                        + CAST(TOV AS FLOAT)
+                    ), 0
+                ) * 100 AS team_off_rating,
+                SUM(CAST(PTS AS FLOAT) - CAST(PLUS_MINUS AS FLOAT)) / NULLIF(
+                    SUM(
+                        CAST(FGA AS FLOAT)
+                        + 0.44 * CAST(FTA AS FLOAT)
+                        - CAST(OREB AS FLOAT)
+                        + CAST(TOV AS FLOAT)
+                    ), 0
+                ) * 100 AS team_def_rating
+            FROM regular_season
+            WHERE CAST(FGA AS FLOAT) > 0
+            GROUP BY SEASON, TEAM_ABBR
+        ),
+        game_pairs AS (
+            SELECT
+                a.TEAM_ID,
+                a.TEAM_ABBR,
+                a.SEASON,
+                a.GAME_ID,
+                a.wl_win,
+                a.is_home,
+                a.is_away,
+                a.rest_days,
+                a.opp_abbr,
+                a.reb AS team_reb,
+                b.reb AS opp_reb,
+                b.tov AS opp_tov,
+                (
+                    b.fga
+                    + 0.44 * b.fta
+                    - b.oreb
+                    + b.tov
+                ) AS opp_possessions
+            FROM games_rest a
+            JOIN games_rest b
+              ON a.SEASON = b.SEASON
+             AND a.GAME_ID = b.GAME_ID
+             AND a.TEAM_ID <> b.TEAM_ID
+        )
+        SELECT
+            gp.TEAM_ID,
+            gp.TEAM_ABBR,
+            gp.SEASON,
+            AVG(tr.team_win_pct) AS rs_sos_win_pct_avg,
+            AVG(tr.team_off_rating - tr.team_def_rating) AS rs_opp_net_rating_avg,
+            AVG(CASE WHEN gp.rest_days IS NOT NULL THEN gp.rest_days ELSE NULL END) AS rs_rest_days_avg,
+            AVG(CASE WHEN gp.rest_days <= 1 THEN 1.0 ELSE 0.0 END) AS rs_b2b_rate,
+            AVG(CASE WHEN gp.is_away = 1 AND gp.rest_days <= 1 THEN 1.0 ELSE 0.0 END) AS rs_rest_travel_burden,
+            AVG(CASE WHEN gp.is_home = 1 THEN gp.wl_win ELSE NULL END) AS rs_home_win_pct,
+            AVG(CASE WHEN gp.is_away = 1 THEN gp.wl_win ELSE NULL END) AS rs_away_win_pct,
+            AVG(CASE WHEN gp.is_home = 1 THEN gp.wl_win ELSE NULL END)
+                - AVG(CASE WHEN gp.is_away = 1 THEN gp.wl_win ELSE NULL END) AS rs_home_away_win_pct_gap,
+            SUM(gp.opp_tov) / NULLIF(SUM(gp.opp_possessions), 0) * 100 AS rs_tov_forced_rate,
+            SUM(gp.team_reb) / NULLIF(SUM(gp.team_reb + gp.opp_reb), 0) AS rs_reb_pct
+        FROM game_pairs gp
+        LEFT JOIN team_records tr
+          ON gp.SEASON = tr.SEASON
+         AND gp.opp_abbr = tr.TEAM_ABBR
+        GROUP BY gp.TEAM_ID, gp.TEAM_ABBR, gp.SEASON
+    """).df()
+
     # --- MERGE AND COMPUTE DELTAS ---
     merged = reg.merge(
         po,
@@ -320,9 +436,24 @@ def compute_team_stats_features() -> pd.DataFrame:
         on=["TEAM_ID", "TEAM_ABBR", "SEASON"],
         how="left"
     )
+    merged = merged.merge(
+        rs_context,
+        on=["TEAM_ID", "TEAM_ABBR", "SEASON"],
+        how="left"
+    )
 
     merged["rs_vs_top_teams_win_pct"] = merged["rs_vs_top_teams_win_pct"].fillna(0.0)
     merged["rs_vs_top_teams_games"] = merged["rs_vs_top_teams_games"].fillna(0)
+    merged["rs_sos_win_pct_avg"] = merged["rs_sos_win_pct_avg"].fillna(merged["rs_win_pct"])
+    merged["rs_opp_net_rating_avg"] = merged["rs_opp_net_rating_avg"].fillna(0.0)
+    merged["rs_rest_days_avg"] = merged["rs_rest_days_avg"].fillna(2.0)
+    merged["rs_b2b_rate"] = merged["rs_b2b_rate"].fillna(0.0)
+    merged["rs_rest_travel_burden"] = merged["rs_rest_travel_burden"].fillna(0.0)
+    merged["rs_home_win_pct"] = merged["rs_home_win_pct"].fillna(merged["rs_win_pct"])
+    merged["rs_away_win_pct"] = merged["rs_away_win_pct"].fillna(merged["rs_win_pct"])
+    merged["rs_home_away_win_pct_gap"] = merged["rs_home_away_win_pct_gap"].fillna(0.0)
+    merged["rs_tov_forced_rate"] = merged["rs_tov_forced_rate"].fillna(0.0)
+    merged["rs_reb_pct"] = merged["rs_reb_pct"].fillna(0.5)
 
     # Compute deltas
     merged["three_pt_rate_delta"] = merged["po_three_pt_rate"] - merged["rs_three_pt_rate"]
@@ -392,6 +523,10 @@ if __name__ == "__main__":
     print(df[[
         "TEAM_ABBR", "SEASON",
         "rs_win_pct",
+        "rs_sos_win_pct_avg", "rs_opp_net_rating_avg",
+        "rs_rest_days_avg", "rs_b2b_rate", "rs_rest_travel_burden",
+        "rs_home_win_pct", "rs_away_win_pct", "rs_home_away_win_pct_gap",
+        "rs_tov_forced_rate", "rs_reb_pct",
         "rs_off_rating", "rs_def_rating", "rs_net_rating",
         "rs_vs_top_teams_win_pct", "rs_vs_top_teams_games",
         "off_rating_delta", "def_rating_delta", "net_rating_delta",

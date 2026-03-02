@@ -3,12 +3,13 @@
 .venv/
 venv/
 
-# Database (large file — don't commit raw data)
+# Raw data and database (large, regeneratable)
 data/raw/
 data/processed/*.duckdb
 
-# Model artifacts
+# Binary model artifacts (regeneratable via pipeline)
 models/trained/*.pkl
+models/trained/*.joblib
 
 # Python
 __pycache__/
