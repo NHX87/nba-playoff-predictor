@@ -2,10 +2,13 @@
 .env
 .venv/
 venv/
+.streamlit/secrets.toml
 
 # Raw data and database (large, regeneratable)
 data/raw/
 data/processed/*.duckdb
+# Allow slim app DB for Streamlit Cloud deployment
+!data/processed/nba_app.duckdb
 
 # Binary model artifacts (regeneratable via pipeline)
 models/trained/*.pkl
