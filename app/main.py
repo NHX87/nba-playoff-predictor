@@ -1021,8 +1021,8 @@ with st.sidebar:
                     unsafe_allow_html=True,
                 )
 
-playin_tab, playoff_tab, team_tab = st.tabs(
-    ["Play-In Predictor / Race", "Playoff Predictor", "Team-by-Team Breakdown"]
+playin_tab, playoff_tab, team_tab, analyst_tab = st.tabs(
+    ["Play-In Predictor / Race", "Playoff Predictor", "Team-by-Team Breakdown", "🤖 AI Analyst"]
 )
 
 with playin_tab:
@@ -1212,5 +1212,117 @@ with team_tab:
                 },
             )
 
-st.divider()
-st.caption("AI analyst is still wired through backend agent modules; this frontend pass focused on tabbed analytics UX and visibility.")
+with analyst_tab:
+    from config.settings import ANTHROPIC_API_KEY, CURRENT_SEASON_STR as _cur_season
+
+    if not ANTHROPIC_API_KEY:
+        st.warning(
+            "AI Analyst requires an **ANTHROPIC_API_KEY**. "
+            "Add it under Space Settings → Variables and secrets."
+        )
+    else:
+        try:
+            from pipeline.agent.analyst import answer_question, get_team_scouting_report
+            _analyst_ok = True
+        except Exception as _e:
+            st.error(f"Could not load analyst module: {_e}")
+            _analyst_ok = False
+
+        if _analyst_ok:
+            # Session state
+            if "analyst_messages" not in st.session_state:
+                st.session_state.analyst_messages = []
+            if "analyst_history" not in st.session_state:
+                st.session_state.analyst_history = []
+
+            # Build model context from loaded tables
+            _top3 = []
+            if not title_df.empty:
+                _top3 = (
+                    title_df.head(3)
+                    .apply(lambda r: f"{r['TEAM_ABBR']} ({float(r['title_prob']):.1%})", axis=1)
+                    .tolist()
+                )
+            _model_context = {
+                "physicality_weight": 1.0,
+                "top_3": ", ".join(_top3) if _top3 else "N/A",
+                "most_physical": "N/A",
+                "pace_teams": "N/A",
+                "season": _cur_season,
+            }
+
+            st.markdown(
+                "<div class='section-label'>Ask about predictions, teams, or the model</div>",
+                unsafe_allow_html=True,
+            )
+
+            # Quick scouting report
+            if not title_df.empty:
+                _col1, _col2 = st.columns([2, 1])
+                with _col1:
+                    _scout_team = st.selectbox(
+                        "Quick scouting report",
+                        title_df["TEAM_ABBR"].tolist(),
+                        key="analyst_scout_team",
+                        label_visibility="collapsed",
+                    )
+                with _col2:
+                    if st.button("Generate report", key="analyst_report_btn", use_container_width=True):
+                        _row = title_df[title_df["TEAM_ABBR"] == _scout_team].iloc[0]
+                        _prompt_text = f"Give me a playoff scouting report for {_scout_team}."
+                        with st.spinner("Generating scouting report…"):
+                            try:
+                                _report = get_team_scouting_report(
+                                    _scout_team,
+                                    {},
+                                    float(_row["title_prob"]),
+                                )
+                                st.session_state.analyst_messages.append(
+                                    {"role": "user", "content": _prompt_text}
+                                )
+                                st.session_state.analyst_messages.append(
+                                    {"role": "assistant", "content": _report}
+                                )
+                                st.session_state.analyst_history.append(
+                                    {"role": "user", "content": _prompt_text}
+                                )
+                                st.session_state.analyst_history.append(
+                                    {"role": "assistant", "content": _report}
+                                )
+                                st.rerun()
+                            except Exception as _err:
+                                st.error(f"Analyst error: {_err}")
+
+            st.divider()
+
+            # Chat history
+            for _msg in st.session_state.analyst_messages:
+                with st.chat_message(_msg["role"]):
+                    st.markdown(_msg["content"])
+
+            # Chat input
+            if _user_input := st.chat_input("Ask about teams, model features, predictions…"):
+                st.session_state.analyst_messages.append(
+                    {"role": "user", "content": _user_input}
+                )
+                with st.chat_message("user"):
+                    st.markdown(_user_input)
+                with st.chat_message("assistant"):
+                    with st.spinner("Thinking…"):
+                        try:
+                            _answer, _updated_hist = answer_question(
+                                _user_input,
+                                _model_context,
+                                st.session_state.analyst_history,
+                            )
+                            st.markdown(_answer)
+                            st.session_state.analyst_messages.append(
+                                {"role": "assistant", "content": _answer}
+                            )
+                            st.session_state.analyst_history = _updated_hist
+                        except Exception as _err:
+                            _err_msg = f"Error: {_err}"
+                            st.error(_err_msg)
+                            st.session_state.analyst_messages.append(
+                                {"role": "assistant", "content": _err_msg}
+                            )
