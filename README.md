@@ -1,5 +1,7 @@
 # NBA Playoff Predictor
 
+**[Live App](https://nhx87-nba-playoff-predictor-app-main.streamlit.app)** &nbsp;|&nbsp; **[Portfolio Site](https://nhx87.github.io/nba-playoff-predictor-site/)**
+
 End-to-end system for ingesting NBA data, engineering playoff-specific features, training a survival model, and exposing outputs in a Streamlit app with an AI analyst layer.
 
 ## What This Repo Contains
