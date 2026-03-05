@@ -54,13 +54,18 @@ def get_team_scouting_report(
     if conversation_history is None:
         conversation_history = []
 
+    _ps = team_stats.get('physicality_score')
+    _fd = team_stats.get('foul_rate_delta')
+    _pd = team_stats.get('pace_delta')
+    _dd = team_stats.get('dreb_pct_delta')
+
     context = f"""
 Team: {team_name}
 Title Probability: {title_probability:.1%}
-Physicality Score: {team_stats.get('physicality_score', 'N/A'):.3f} (higher = more physical in playoffs)
-Foul Rate Delta: {team_stats.get('foul_rate_delta', 'N/A'):.2f} (regular season → playoffs)
-Pace Delta: {team_stats.get('pace_delta', 'N/A'):.2f} (negative = slows down in playoffs)
-Defensive Rebound Delta: {team_stats.get('dreb_pct_delta', 'N/A'):.3f}
+Physicality Score: {f"{_ps:.3f}" if _ps is not None else "N/A"} (higher = more physical in playoffs)
+Foul Rate Delta: {f"{_fd:.2f}" if _fd is not None else "N/A"} (regular season → playoffs)
+Pace Delta: {f"{_pd:.2f}" if _pd is not None else "N/A"} (negative = slows down in playoffs)
+Defensive Rebound Delta: {f"{_dd:.3f}" if _dd is not None else "N/A"}
 Physicality Weight Setting: {physicality_weight:.1f}x
 
 Generate a concise playoff scouting report for this team based on their physicality profile and title probability.
