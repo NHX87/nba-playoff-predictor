@@ -1,3 +1,14 @@
+---
+title: NBA Playoff Predictor
+emoji: 🏀
+colorFrom: blue
+colorTo: indigo
+sdk: streamlit
+sdk_version: "1.54.0"
+app_file: app/main.py
+pinned: false
+---
+
 # NBA Playoff Predictor
 
 **[Live App](https://huggingface.co/spaces/NHX87/nba-playoff-predictor)** &nbsp;|&nbsp; **[Portfolio Site](https://nhx87.github.io/nba-playoff-predictor-site/)**

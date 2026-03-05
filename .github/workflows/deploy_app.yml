@@ -54,14 +54,18 @@ jobs:
               ],
           )
 
-          # Explicitly upload .streamlit/config.toml — upload_folder can skip hidden dirs
-          api.upload_file(
-              path_or_fileobj=".streamlit/config.toml",
-              path_in_repo=".streamlit/config.toml",
-              repo_id=repo_id,
-              repo_type="space",
-              commit_message="chore: deploy .streamlit/config.toml",
-          )
+          # Explicitly upload files that upload_folder can skip (hidden dirs, root files)
+          for src, dest in [
+              (".streamlit/config.toml", ".streamlit/config.toml"),
+              ("README.md", "README.md"),
+          ]:
+              api.upload_file(
+                  path_or_fileobj=src,
+                  path_in_repo=dest,
+                  repo_id=repo_id,
+                  repo_type="space",
+                  commit_message=f"chore: deploy {dest}",
+              )
 
           print(f"Deployed to https://huggingface.co/spaces/{repo_id}")
           EOF
