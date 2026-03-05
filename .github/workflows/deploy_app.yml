@@ -1,0 +1,57 @@
+name: Deploy App to HF Spaces
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - '.streamlit/**'
+      - 'config/**'
+      - 'pipeline/**'
+      - 'requirements.txt'
+  workflow_dispatch:
+
+env:
+  HF_REPO_ID: NHX87/nba-playoff-predictor
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Push source code to HF Spaces
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_REPO_ID: ${{ env.HF_REPO_ID }}
+        run: |
+          pip install -q huggingface_hub
+          python - <<'EOF'
+          import os
+          from huggingface_hub import HfApi
+
+          api = HfApi(token=os.environ["HF_TOKEN"])
+          repo_id = os.environ["HF_REPO_ID"]
+
+          # Push app source code (excludes raw data, venvs, caches, model binaries)
+          api.upload_folder(
+              folder_path=".",
+              path_in_repo=".",
+              repo_id=repo_id,
+              repo_type="space",
+              commit_message="chore: deploy app source code",
+              ignore_patterns=[
+                  "*.pkl", "*.joblib", "*.parquet",
+                  "data/raw/**", "data/processed/*.duckdb",
+                  ".git/**", ".github/**",
+                  "__pycache__/**", "*.pyc",
+                  ".venv/**", "venv/**",
+                  "notebooks/**",
+                  "*.egg-info/**",
+              ],
+          )
+          print(f"Deployed to https://huggingface.co/spaces/{repo_id}")
+          EOF
