@@ -47,7 +47,7 @@ def _back_calculate_p_game(p_series: float) -> float:
     p_series = float(np.clip(p_series, 0.001, 0.999))
     if abs(p_series - 0.5) < 1e-9:
         return 0.5
-    lo, hi = (0.5001, 0.9999) if p_series > 0.5 else (0.0001, 0.4999)
+    lo, hi = (0.5, 0.9999) if p_series > 0.5 else (0.0001, 0.5)
     return float(brentq(lambda p: _series_win_prob(p) - p_series, lo, hi))
 
 
