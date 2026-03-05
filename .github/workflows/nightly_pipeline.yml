@@ -1,0 +1,71 @@
+name: Nightly Pipeline
+
+on:
+  schedule:
+    - cron: '0 2 * * *'   # 2 AM UTC daily
+  workflow_dispatch:        # manual trigger from GitHub UI
+
+env:
+  HF_REPO_ID: NHX87/nba-playoff-predictor
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt huggingface_hub
+
+      - name: Run pipeline
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          python -m pipeline.run_pipeline \
+            --with-model \
+            --with-current-projections \
+            --with-sanity-report
+
+      - name: Push artifacts to Hugging Face Spaces
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_REPO_ID: ${{ env.HF_REPO_ID }}
+        run: |
+          python - <<'EOF'
+          import os
+          from huggingface_hub import HfApi
+
+          api = HfApi(token=os.environ["HF_TOKEN"])
+          repo_id = os.environ["HF_REPO_ID"]
+
+          # Push slim app database (what Streamlit reads)
+          api.upload_file(
+              path_or_fileobj="data/processed/nba_app.duckdb",
+              path_in_repo="data/processed/nba_app.duckdb",
+              repo_id=repo_id,
+              repo_type="space",
+              commit_message="chore: nightly pipeline — updated DB",
+          )
+
+          # Push model artifacts (CSV, JSON, MD — skip binary pkl/joblib)
+          api.upload_folder(
+              folder_path="models/trained",
+              path_in_repo="models/trained",
+              repo_id=repo_id,
+              repo_type="space",
+              commit_message="chore: nightly pipeline — updated model artifacts",
+              ignore_patterns=["*.pkl", "*.joblib"],
+          )
+
+          print(f"Pushed to https://huggingface.co/spaces/{repo_id}")
+          EOF
