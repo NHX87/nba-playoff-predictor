@@ -12,7 +12,7 @@ env:
 jobs:
   pipeline:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 500
 
     steps:
       - name: Checkout
