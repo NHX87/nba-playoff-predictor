@@ -15,17 +15,25 @@ from pathlib import Path
 
 import pandas as pd
 from nba_api.stats.endpoints import teamgamelogs
+from nba_api.stats.library import http as _nba_http
 from nba_api.stats.static import teams
 from tqdm import tqdm
 
 from config.settings import CURRENT_SEASON_STR, TRAIN_SEASONS
 
+# stats.nba.com requires these headers; inject before any requests are made
+_nba_http.STATS_HEADERS.update({
+    "x-nba-stats-token": "true",
+    "x-nba-stats-origin": "stats",
+})
+
 RAW_PATH = Path("data/raw")
 RAW_PATH.mkdir(parents=True, exist_ok=True)
 
-SLEEP_BETWEEN_CALLS = 0.6
-MAX_RETRIES_PER_TEAM = 4
-RETRY_BASE_SLEEP = 1.0
+SLEEP_BETWEEN_CALLS = 1.0
+MAX_RETRIES_PER_TEAM = 3
+RETRY_BASE_SLEEP = 5.0
+REQUEST_TIMEOUT = 45
 
 
 def _fetch_single_team_logs(team: dict, season: str, season_type: str) -> pd.DataFrame:
@@ -33,6 +41,7 @@ def _fetch_single_team_logs(team: dict, season: str, season_type: str) -> pd.Dat
         team_id_nullable=team["id"],
         season_nullable=season,
         season_type_nullable=season_type,
+        timeout=REQUEST_TIMEOUT,
     )
     df = logs.get_data_frames()[0]
     df["TEAM_ID"] = team["id"]

@@ -19,7 +19,14 @@ import sys
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
 from nba_api.stats.endpoints import playergamelogs
+from nba_api.stats.library import http as _nba_http
 from config.settings import DB_PATH, TRAIN_SEASONS, CURRENT_SEASON_STR
+
+# stats.nba.com requires these headers; inject before any requests are made
+_nba_http.STATS_HEADERS.update({
+    "x-nba-stats-token": "true",
+    "x-nba-stats-origin": "stats",
+})
 
 RAW_PATH = Path("data/raw")
 RAW_PATH.mkdir(parents=True, exist_ok=True)
@@ -45,6 +52,7 @@ def fetch_player_logs_by_season(season: str, season_type: str = "Regular Season"
         logs = playergamelogs.PlayerGameLogs(
             season_nullable=season,
             season_type_nullable=season_type,
+            timeout=60,
         )
         df = logs.get_data_frames()[0]
 
