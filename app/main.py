@@ -393,7 +393,7 @@ def render_sidebar_live_scores(games_df: pd.DataFrame, leaders_df: pd.DataFrame)
             with c3:
                 st.image(logo_url(row.home_tricode), width=16)
             st.markdown(
-                "<div style='border-bottom:1px solid #243753; margin:0.2rem 0 0.35rem 0;'></div>",
+                "<div style='border-bottom:1px solid #E4E7EE; margin:0.2rem 0 0.35rem 0;'></div>",
                 unsafe_allow_html=True,
             )
 
@@ -728,23 +728,19 @@ def add_theme() -> None:
         @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=Manrope:wght@400;500;600;700&display=swap');
 
         :root {
-            --bg: #090e19;
-            --bg2: #111a2b;
-            --surface: #141f33;
-            --surface2: #19263d;
-            --ink: #f4f7ff;
-            --muted: #9fb0cb;
-            --line: #2a3c5b;
-            --brand: #35a7ff;
-            --accent: #2ee6b8;
+            --bg: #F7F8FC;
+            --surface: #FFFFFF;
+            --surface2: #F1F3F9;
+            --ink: #111827;
+            --muted: #6B7280;
+            --line: #E4E7EE;
+            --brand: #2563EB;
+            --accent: #059669;
         }
         .stApp {
             font-family: 'Manrope', sans-serif;
             color: var(--ink);
-            background:
-                radial-gradient(circle at 15% -10%, rgba(53,167,255,0.22), transparent 36%),
-                radial-gradient(circle at 95% 0%, rgba(46,230,184,0.16), transparent 34%),
-                linear-gradient(180deg, var(--bg2), var(--bg));
+            background: var(--bg);
         }
         h1, h2, h3, h4 { font-family: 'Sora', sans-serif; color: var(--ink); }
         .block-container { padding-top: 1.2rem; }
@@ -757,7 +753,7 @@ def add_theme() -> None:
             box-shadow: none;
             margin-bottom: 0.45rem;
         }
-        .hero-title { font-size: 1.8rem; font-weight: 800; letter-spacing: -0.02em; }
+        .hero-title { font-size: 1.8rem; font-weight: 800; letter-spacing: -0.02em; color: var(--ink); }
         .hero-sub { color: var(--muted); margin-top: 0.3rem; }
 
         .summary-line { color: var(--ink); font-size: 1rem; font-weight: 600; }
@@ -772,17 +768,18 @@ def add_theme() -> None:
         }
         .meta-chip {
             display: inline-block;
-            border: 1px solid #2a3c5b;
-            background: rgba(17, 26, 43, 0.7);
-            border-radius: 6px;
-            color: #c8d6ef;
+            border: 1px solid var(--line);
+            background: var(--surface);
+            border-radius: 5px;
+            color: var(--muted);
             font-size: 0.76rem;
             padding: 0.2rem 0.45rem;
             line-height: 1.2;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.04);
         }
         .champ-note {
             margin-top: 0.45rem;
-            color: #f4f7ff;
+            color: var(--ink);
             font-weight: 700;
             text-align: center;
             font-size: 0.92rem;
@@ -797,23 +794,23 @@ def add_theme() -> None:
             width: 36px;
             height: 36px;
             border-radius: 50%;
-            border: 1px solid #3a5887;
-            background: rgba(20, 31, 51, 0.92);
+            border: 1px solid var(--line);
+            background: var(--surface);
             padding: 2px;
         }
         .bracket-board {
-            border: 1px solid #2a3c5b;
-            border-radius: 14px;
-            background:
-                linear-gradient(180deg, rgba(12, 19, 34, 0.97), rgba(10, 18, 33, 0.94));
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            background: var(--surface);
+            box-shadow: 0 1px 4px rgba(0,0,0,0.05);
             padding: 0.9rem;
         }
         .bracket-title {
             font-family: 'Sora', sans-serif;
             font-size: 0.85rem;
             font-weight: 700;
-            letter-spacing: 0.08em;
-            color: #c5d6f5;
+            letter-spacing: 0.07em;
+            color: var(--muted);
             text-align: center;
         }
         .bracket-title-row {
@@ -823,7 +820,7 @@ def add_theme() -> None:
             gap: 0.55rem;
             margin-bottom: 0.45rem;
         }
-        .bracket-title.center { color: #f4f7ff; }
+        .bracket-title.center { color: var(--ink); }
         .bracket-main {
             display: grid;
             grid-template-columns: 1.45fr 1.2fr 1.45fr;
@@ -855,11 +852,12 @@ def add_theme() -> None:
         .br-col.r3 { padding-top: 4.6rem; }
         .br-card {
             position: relative;
-            border: 1px solid #32496f;
-            background: rgba(22, 34, 56, 0.96);
+            border: 1px solid var(--line);
+            background: var(--surface);
             border-radius: 8px;
             padding: 0.34rem 0.4rem;
             min-height: 4.2rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.04);
         }
         .br-card.placeholder {
             opacity: 0.25;
@@ -871,28 +869,28 @@ def add_theme() -> None:
             gap: 0.36rem;
             line-height: 1.1;
         }
-        .br-row.winner span { color: #f4f7ff; font-weight: 700; font-size: 0.82rem; }
-        .br-row.loser span { color: #9fb0cb; font-size: 0.76rem; }
+        .br-row.winner span { color: var(--ink); font-weight: 700; font-size: 0.82rem; }
+        .br-row.loser span { color: var(--muted); font-size: 0.76rem; }
         .br-logo { width: 18px; height: 18px; border-radius: 50%; }
-        .br-logo.small { width: 14px; height: 14px; opacity: 0.88; }
+        .br-logo.small { width: 14px; height: 14px; opacity: 0.75; }
         .br-score {
             margin-top: 0.26rem;
-            color: #dce7ff;
+            color: var(--ink);
             font-size: 0.75rem;
-            font-weight: 700;
+            font-weight: 600;
         }
         .br-odds {
-            color: #9fb0cb;
+            color: var(--muted);
             font-size: 0.72rem;
         }
-        .br-odds span { color: #2ee6b8; font-weight: 700; }
+        .br-odds span { color: var(--brand); font-weight: 700; }
         .br-card.to-right::after {
             content: "";
             position: absolute;
             right: -9px;
             top: 50%;
             width: 9px;
-            border-top: 1px solid #3f577e;
+            border-top: 1px solid var(--line);
         }
         .br-card.to-left::before {
             content: "";
@@ -900,7 +898,7 @@ def add_theme() -> None:
             left: -9px;
             top: 50%;
             width: 9px;
-            border-top: 1px solid #3f577e;
+            border-top: 1px solid var(--line);
         }
         @media (max-width: 1200px) {
             .bracket-title-row,
@@ -933,11 +931,11 @@ def add_theme() -> None:
         .stTabs [aria-selected="true"] {
             background: transparent !important;
             color: var(--ink) !important;
-            border-bottom: 2px solid #35a7ff !important;
+            border-bottom: 2px solid var(--brand) !important;
         }
 
         [data-testid="stSidebar"] {
-            background: #0f1728;
+            background: var(--surface);
             border-right: 1px solid var(--line);
         }
         </style>
@@ -968,7 +966,7 @@ st.markdown(
     f"""
     <div class='hero'>
       <div class='hero-title'>NBA Playoff Predictor Dashboard</div>
-      <div class='hero-sub'>Dark analytics interface for {CURRENT_SEASON_STR}: play-in race, playoff prediction, and full team-level scouting.</div>
+      <div class='hero-sub'>Analytics dashboard for {CURRENT_SEASON_STR}: play-in race, playoff prediction, and full team-level scouting.</div>
     </div>
     """,
     unsafe_allow_html=True,
@@ -1062,21 +1060,22 @@ with playin_tab:
                     st.markdown(
                         f"""
                         <div style="
-                            border:1px solid #2a3c5b;
-                            background: rgba(20,31,51,0.90);
-                            border-radius:12px;
+                            border:1px solid #E4E7EE;
+                            background:#FFFFFF;
+                            border-radius:8px;
                             padding:0.55rem 0.7rem;
                             margin-bottom:0.5rem;
                             display:flex;
                             align-items:center;
                             justify-content:space-between;
-                            gap:0.6rem;">
+                            gap:0.6rem;
+                            box-shadow:0 1px 3px rgba(0,0,0,0.05);">
                             <div style="display:flex;align-items:center;gap:0.55rem;">
                                 <img src="{logo_url(row.team_abbr)}" width="30" height="30" style="border-radius:50%;" />
-                                <div style="font-weight:700;color:#f4f7ff;">{row.team_abbr}</div>
+                                <div style="font-weight:700;color:#111827;">{row.team_abbr}</div>
                             </div>
-                            <div style="color:#9fb0cb;font-size:0.86rem;">Proj Seed: <span style="color:#f4f7ff;font-weight:700;">{int(row.projected_seed)}</span></div>
-                            <div style="color:#9fb0cb;font-size:0.86rem;">Make Playoffs: <span style="color:#2ee6b8;font-weight:700;">{float(row.made_playoffs_prob):.1%}</span></div>
+                            <div style="color:#6B7280;font-size:0.86rem;">Proj Seed: <span style="color:#111827;font-weight:700;">{int(row.projected_seed)}</span></div>
+                            <div style="color:#6B7280;font-size:0.86rem;">Make Playoffs: <span style="color:#059669;font-weight:700;">{float(row.made_playoffs_prob):.1%}</span></div>
                         </div>
                         """,
                         unsafe_allow_html=True,
@@ -1155,11 +1154,11 @@ with team_tab:
                 height=360,
                 paper_bgcolor="rgba(0,0,0,0)",
                 plot_bgcolor="rgba(0,0,0,0)",
-                font_color="#dce7ff",
+                font_color="#111827",
                 margin=dict(l=10, r=10, t=10, b=10),
                 showlegend=False,
-                yaxis=dict(title="Title Odds (%)", color=line_color, ticksuffix="%"),
-                xaxis=dict(title="Date"),
+                yaxis=dict(title="Title Odds (%)", color=line_color, ticksuffix="%", gridcolor="#E4E7EE"),
+                xaxis=dict(title="Date", gridcolor="#E4E7EE"),
             )
             st.plotly_chart(fig, width="stretch")
             st.caption(
