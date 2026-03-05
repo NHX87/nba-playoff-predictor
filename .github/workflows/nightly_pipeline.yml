@@ -33,6 +33,7 @@ jobs:
       - name: Run pipeline
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DB_PATH: data/processed/nba_app.duckdb
         run: |
           python -m pipeline.run_pipeline \
             --with-model \
