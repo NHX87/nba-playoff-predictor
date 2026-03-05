@@ -33,9 +33,16 @@ import joblib
 import numpy as np
 import pandas as pd
 from nba_api.stats.endpoints import leaguestandingsv3
+from nba_api.stats.library import http as _nba_http
 
 from config.settings import CURRENT_SEASON_STR, DB_PATH
 from pipeline.models.survival import MODEL_PATH
+
+# Inject headers required by stats.nba.com (shared dict, safe to call here too)
+_nba_http.STATS_HEADERS.update({
+    "x-nba-stats-token": "true",
+    "x-nba-stats-origin": "stats",
+})
 
 OUTPUT_DIR = Path("models/trained")
 OUTPUT_PREDICTIONS = OUTPUT_DIR / "current_season_predictions.csv"
@@ -43,6 +50,7 @@ OUTPUT_PLAYOFF_FIELD = OUTPUT_DIR / "projected_playoff_field.csv"
 OUTPUT_MATCHUPS = OUTPUT_DIR / "projected_first_round_matchups.csv"
 OUTPUT_PLAYIN = OUTPUT_DIR / "play_in_simulation_results.csv"
 OUTPUT_FEATURE_SNAPSHOT = OUTPUT_DIR / "current_feature_snapshot.csv"
+STANDINGS_CACHE_PATH = Path("data/processed/standings_cache.csv")
 
 CURRENT_RS_FEATURES = [
     "rs_vs_top_teams_win_pct",
@@ -90,14 +98,16 @@ def _load_team_lookup(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     return lookup
 
 
-def _get_current_standings(team_lookup: pd.DataFrame) -> pd.DataFrame:
-    standings = leaguestandingsv3.LeagueStandingsV3(season=CURRENT_SEASON_STR).get_data_frames()[0]
+def _fetch_standings_from_api(team_lookup: pd.DataFrame) -> pd.DataFrame:
+    """Fetch live standings from stats.nba.com. Raises on timeout/error."""
+    raw = leaguestandingsv3.LeagueStandingsV3(
+        season=CURRENT_SEASON_STR, timeout=60
+    ).get_data_frames()[0]
 
-    keep = standings[
+    keep = raw[
         ["TeamID", "Conference", "PlayoffRank", "WINS", "LOSSES", "WinPCT", "Record"]
     ].copy()
     keep = keep.rename(columns={"TeamID": "TEAM_ID", "WINS": "wins", "LOSSES": "losses", "WinPCT": "win_pct"})
-
     keep["playoff_rank"] = pd.to_numeric(keep["PlayoffRank"], errors="coerce")
     keep = keep.drop(columns=["PlayoffRank"])
 
@@ -108,12 +118,34 @@ def _get_current_standings(team_lookup: pd.DataFrame) -> pd.DataFrame:
 
     merged["conference"] = merged["Conference"].str.title()
     merged = merged.drop(columns=["Conference"])
-
     merged["in_playoff_top6"] = merged["playoff_rank"] <= 6
     merged["in_play_in"] = merged["playoff_rank"].between(7, 10, inclusive="both")
     merged["in_top8_by_standings"] = merged["playoff_rank"] <= 8
-
     return merged
+
+
+def _get_current_standings(team_lookup: pd.DataFrame) -> pd.DataFrame:
+    try:
+        standings = _fetch_standings_from_api(team_lookup)
+        STANDINGS_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        standings.to_csv(STANDINGS_CACHE_PATH, index=False)
+        print(f"  Standings fetched from API and cached → {STANDINGS_CACHE_PATH}")
+        return standings
+    except Exception as exc:
+        print(f"  Warning: standings API call failed ({exc})")
+
+    if STANDINGS_CACHE_PATH.exists():
+        print(f"  Falling back to cached standings: {STANDINGS_CACHE_PATH}")
+        cached = pd.read_csv(STANDINGS_CACHE_PATH)
+        for col in ("in_playoff_top6", "in_play_in", "in_top8_by_standings"):
+            if col in cached.columns:
+                cached[col] = cached[col].astype(bool)
+        return cached
+
+    raise RuntimeError(
+        "standings.nba.com is unreachable and no standings cache exists. "
+        f"Run locally once to create {STANDINGS_CACHE_PATH}."
+    )
 
 
 def _current_regular_season_features(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
