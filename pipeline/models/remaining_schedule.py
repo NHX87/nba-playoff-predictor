@@ -51,11 +51,11 @@ def _load_current_records(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
 
 
 def _load_net_ratings(con: duckdb.DuckDBPyConnection) -> dict[str, float]:
-    """Load current-season net ratings from model_features."""
+    """Load current-season net ratings from current_feature_snapshot."""
     df = con.execute(
         f"""
         SELECT TEAM_ABBR, rs_net_rating
-        FROM model_features
+        FROM current_feature_snapshot
         WHERE SEASON = '{CURRENT_SEASON_STR}'
         """
     ).df()

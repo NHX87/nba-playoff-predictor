@@ -194,7 +194,7 @@ def load_base_tables() -> dict[str, pd.DataFrame]:
         "series": """
             SELECT conference, round, high_seed, high_team, low_seed, low_team,
                    high_team_win_prob, low_team_win_prob, predicted_winner,
-                   p_4_games, p_5_games, p_6_games, p_7_games, expected_games
+                   p_4_games, p_5_games, p_6_games, p_7_games, expected_games, most_likely_games
             FROM app_series_predictions_current
             ORDER BY
                 CASE round
@@ -719,11 +719,13 @@ def player_summary(player_df: pd.DataFrame, team_abbr: str) -> pd.DataFrame:
 
 
 def projected_series_games(row: pd.Series) -> int:
-    """Return projected total games in series as integer in [4, 7]."""
-    expected = row.get("expected_games")
-    if pd.notna(expected):
-        return int(max(4, min(7, round(float(expected)))))
+    """Return projected total games in series as integer in [4, 7].
+    Uses most_likely_games (mode of discrete distribution) for better variance."""
+    mlg = row.get("most_likely_games")
+    if pd.notna(mlg):
+        return int(mlg)
 
+    # Fallback: mode from individual probabilities
     probs = {
         4: row.get("p_4_games"),
         5: row.get("p_5_games"),
@@ -1515,16 +1517,18 @@ with playoff_tab:
             if all(c in sel_row.index for c in p_cols):
                 length_vals = [float(sel_row[c]) for c in p_cols]
                 length_labels = ["4 Games", "5 Games", "6 Games", "7 Games"]
+                _game_colors = ["#2ecc71", "#3498db", "#f39c12", "#e74c3c"]
+                mlg_val = int(sel_row.get("most_likely_games", 6) or 6)
                 fig_len = go.Figure(go.Bar(
                     x=length_labels,
                     y=[v * 100 for v in length_vals],
-                    marker_color=[TEAM_COLORS.get(winner, "#35a7ff")] * 4,
+                    marker_color=_game_colors,
                     text=[f"{v:.1%}" for v in length_vals],
                     textposition="outside",
                 ))
                 expected = float(sel_row.get("expected_games", 0) or 0)
                 fig_len.update_layout(
-                    title=f"Series Length Distribution (Expected: {expected:.1f} games)",
+                    title=f"Series Length Distribution (Most likely: {mlg_val} games, Expected: {expected:.1f}g)",
                     yaxis_title="Probability (%)",
                     height=280,
                     margin=dict(t=40, b=20, l=20, r=20),
