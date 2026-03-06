@@ -68,6 +68,11 @@ def main() -> None:
         help="Generate current-season projections + Monte Carlo simulation outputs for the app.",
     )
     parser.add_argument(
+        "--with-remaining-schedule",
+        action="store_true",
+        help="Compute per-game win probs + Monte Carlo seed simulation for remaining RS games.",
+    )
+    parser.add_argument(
         "--with-sanity-report",
         action="store_true",
         help="Generate model sanity report artifacts (requires simulation outputs).",
@@ -115,6 +120,10 @@ def main() -> None:
     if args.with_current_projections:
         _run_stage(Stage("Predict current season field", predict_current_season))
         _run_stage(Stage("Run Monte Carlo simulation", run_simulation))
+
+    if args.with_remaining_schedule:
+        from pipeline.models.remaining_schedule import build_remaining_schedule
+        _run_stage(Stage("Build remaining schedule projections", build_remaining_schedule))
 
     if args.with_sanity_report:
         _run_stage(Stage("Generate model sanity report", generate_sanity_report))

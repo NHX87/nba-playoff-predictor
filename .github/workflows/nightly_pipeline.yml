@@ -118,6 +118,7 @@ jobs:
           python -m pipeline.run_pipeline \
             --with-model \
             --with-current-projections \
+            --with-remaining-schedule \
             --with-sanity-report
 
       - name: Export app tables to nba_app.duckdb
@@ -134,8 +135,10 @@ jobs:
               "loyo_series_predictions",
               "current_season_predictions",
               "current_feature_snapshot",
-              "regular_season",       # feeds odds-over-time chart + last-10 hot streaks
-              "raw_player_logs_rs",   # feeds player stats in team drilldown
+              "regular_season",         # feeds odds-over-time chart + last-10 hot streaks
+              "raw_player_logs_rs",     # feeds player stats in team drilldown
+              "team_remaining_games",   # per-game win probs for upcoming opponents
+              "team_projected_record",  # Monte Carlo projected final records + seed probs
           ]
 
           src = duckdb.connect("data/processed/nba.duckdb", read_only=True)

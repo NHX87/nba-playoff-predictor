@@ -126,6 +126,20 @@ def load_base_tables() -> dict[str, pd.DataFrame]:
             FROM model_features
             WHERE SEASON = '{CURRENT_SEASON_STR}'
         """,
+        "remaining_games": f"""
+            SELECT TEAM_ABBR, GAME_DATE, OPP_ABBR, IS_HOME, OPP_NET_RATING, GAME_WIN_PROB
+            FROM team_remaining_games
+            WHERE SEASON = '{CURRENT_SEASON_STR}'
+            ORDER BY TEAM_ABBR, GAME_DATE
+        """,
+        "projected_records": f"""
+            SELECT TEAM_ABBR, CONFERENCE, current_wins, current_losses, games_remaining,
+                   expected_final_wins, expected_final_losses,
+                   p10_final_wins, p90_final_wins,
+                   prob_make_top6, prob_make_playin, prob_miss_playoffs, projected_seed_median
+            FROM team_projected_record
+            WHERE SEASON = '{CURRENT_SEASON_STR}'
+        """,
     }
 
     try:
@@ -143,6 +157,8 @@ def load_base_tables() -> dict[str, pd.DataFrame]:
             "player_rs": "raw_player_logs_rs",
             "current_preds": "current_season_predictions",
             "features": "model_features",
+            "remaining_games": "team_remaining_games",
+            "projected_records": "team_projected_record",
         }
         for key, sql in queries.items():
             out[key] = con.execute(sql).df() if mapping[key] in tables else pd.DataFrame()
@@ -154,6 +170,9 @@ def load_base_tables() -> dict[str, pd.DataFrame]:
 
     if not out.get("player_rs", pd.DataFrame()).empty:
         out["player_rs"]["GAME_DATE"] = _to_dt(out["player_rs"]["GAME_DATE"])
+
+    if not out.get("remaining_games", pd.DataFrame()).empty:
+        out["remaining_games"]["GAME_DATE"] = _to_dt(out["remaining_games"]["GAME_DATE"])
 
     return out
 
@@ -956,6 +975,8 @@ rs_df = tables.get("rs", pd.DataFrame())
 player_rs_df = tables.get("player_rs", pd.DataFrame())
 current_preds_df = tables.get("current_preds", pd.DataFrame())
 features_df = tables.get("features", pd.DataFrame())
+remaining_games_df = tables.get("remaining_games", pd.DataFrame())
+projected_records_df = tables.get("projected_records", pd.DataFrame())
 
 st.markdown(
     f"""
@@ -1073,6 +1094,15 @@ with playin_tab:
                         max_wins = int(bubble.iloc[0]["wins"])
                         bubble["gb"] = (max_wins - bubble["wins"]) / 1.0
 
+                        # Build projected-record lookup for this conference
+                        proj_lookup: dict = {}
+                        if not projected_records_df.empty:
+                            conf_proj = projected_records_df[
+                                projected_records_df["CONFERENCE"] == conf_name
+                            ]
+                            for _, pr in conf_proj.iterrows():
+                                proj_lookup[pr["TEAM_ABBR"]] = pr
+
                         st.markdown("**Bubble Standings (Seeds 5–12)**")
                         rows_html = ""
                         for br in bubble.itertuples(index=False):
@@ -1081,6 +1111,25 @@ with playin_tab:
                             record = f"{int(br.wins)}-{int(br.losses)}"
                             gb = float(br.gb)
                             gb_str = "—" if gb == 0 else f"{gb:.1f}"
+
+                            # Projected final record from Monte Carlo
+                            proj = proj_lookup.get(abbr)
+                            proj_str = ""
+                            seed_risk_badge = ""
+                            if proj is not None:
+                                ef_w = proj["expected_final_wins"]
+                                p10_w = proj["p10_final_wins"]
+                                p90_w = proj["p90_final_wins"]
+                                proj_str = f'<span style="color:#6B7280;font-size:0.78rem;margin-left:0.3rem;">proj {ef_w:.0f}W ({p10_w}–{p90_w})</span>'
+                                # Seed-specific risk/opportunity badge
+                                if seed == 6:
+                                    fall_p = proj["prob_make_playin"]
+                                    if fall_p > 0.15:
+                                        seed_risk_badge = f'<span style="background:#FEF3C7;color:#92400E;border-radius:4px;padding:1px 5px;font-size:0.72rem;">FALL RISK {fall_p:.0%}</span>'
+                                elif seed == 11:
+                                    climb_p = proj["prob_make_playin"]
+                                    if climb_p > 0.10:
+                                        seed_risk_badge = f'<span style="background:#D1FAE5;color:#065F46;border-radius:4px;padding:1px 5px;font-size:0.72rem;">CLIMB {climb_p:.0%}</span>'
 
                             # Zone badge
                             if seed <= 6:
@@ -1091,18 +1140,22 @@ with playin_tab:
                                     zone += ' <span style="background:#FEF3C7;color:#92400E;border-radius:4px;padding:1px 5px;font-size:0.72rem;">WATCH</span>'
                             elif seed <= 10:
                                 zone = '<span style="background:#DBEAFE;color:#1E40AF;border-radius:4px;padding:1px 6px;font-size:0.75rem;font-weight:700;">PLAY-IN</span>'
+                                if proj is not None:
+                                    zone += f' <span style="color:#6B7280;font-size:0.78rem;">{proj["prob_make_playin"]:.0%} in</span>'
                             else:
                                 zone = '<span style="background:#F3F4F6;color:#6B7280;border-radius:4px;padding:1px 6px;font-size:0.75rem;font-weight:700;">OUT</span>'
 
                             hot = _hot_streak(abbr)
                             rows_html += f"""
-                            <div style="display:flex;align-items:center;gap:0.5rem;padding:0.3rem 0;border-bottom:1px solid #F3F4F6;">
+                            <div style="display:flex;align-items:center;gap:0.5rem;padding:0.3rem 0;border-bottom:1px solid #F3F4F6;flex-wrap:wrap;">
                                 <span style="color:#9CA3AF;font-size:0.8rem;width:1.4rem;text-align:right;">{seed}</span>
                                 <img src="{logo_url(abbr)}" width="20" height="20" style="border-radius:50%;" />
                                 <span style="font-weight:700;font-size:0.9rem;width:2.5rem;">{abbr}</span>
                                 <span style="color:#374151;font-size:0.85rem;width:4rem;">{record}</span>
+                                {proj_str}
                                 <span style="color:#9CA3AF;font-size:0.8rem;width:3rem;">{gb_str} GB</span>
                                 {zone}
+                                {seed_risk_badge}
                                 <span style="margin-left:auto;">{hot}</span>
                             </div>"""
                         st.markdown(
@@ -1370,17 +1423,62 @@ with team_tab:
                     hide_index=True,
                 )
 
-            proj = team_next10_projection(rs_df, features_df, team_abbr)
-            n_available = proj["games_available"]
-            st.metric(
-                f"Next {n_available} Projected W-L",
-                value=f"{proj['projected_wins']:.1f}W – {proj['projected_losses']:.1f}L",
+            # ── Upcoming games + projected final record ──────────────────
+            team_upcoming = (
+                remaining_games_df[remaining_games_df["TEAM_ABBR"] == team_abbr]
+                .sort_values("GAME_DATE")
+                .head(10)
+                if not remaining_games_df.empty else pd.DataFrame()
             )
-            st.caption(
-                f"Expected {proj['projected_wins']:.1f}W – {proj['projected_losses']:.1f}L over next {n_available} games "
-                f"(confidence range: {proj['range_low']}–{proj['range_high']} wins). "
-                "Based on team strength vs league average — upcoming schedule not yet integrated."
+
+            team_proj_rec = (
+                projected_records_df[projected_records_df["TEAM_ABBR"] == team_abbr].iloc[0]
+                if not projected_records_df.empty and team_abbr in projected_records_df["TEAM_ABBR"].values
+                else None
             )
+
+            if team_proj_rec is not None:
+                ef_w = team_proj_rec["expected_final_wins"]
+                ef_l = team_proj_rec["expected_final_losses"]
+                p10 = team_proj_rec["p10_final_wins"]
+                p90 = team_proj_rec["p90_final_wins"]
+                g_rem = int(team_proj_rec["games_remaining"])
+                st.metric(
+                    "Projected Final Record",
+                    value=f"{ef_w:.0f}W – {ef_l:.0f}L",
+                )
+                st.caption(
+                    f"Range: {p10}–{p90} wins | {g_rem} games remaining (5,000-sim Monte Carlo)"
+                )
+
+            if not team_upcoming.empty:
+                st.markdown("**Upcoming Games**")
+                up_display = team_upcoming.copy()
+                up_display["Date"] = up_display["GAME_DATE"].apply(
+                    lambda d: d.strftime("%b %d") if hasattr(d, "strftime") else str(d)
+                )
+                up_display["H/A"] = up_display["IS_HOME"].map({True: "vs", False: "@"})
+                up_display["Opp Net Rtg"] = up_display["OPP_NET_RATING"].map("{:+.1f}".format)
+                up_display["Win Prob"] = up_display["GAME_WIN_PROB"].map("{:.0%}".format)
+                st.dataframe(
+                    up_display[["Date", "H/A", "OPP_ABBR", "Opp Net Rtg", "Win Prob"]].rename(
+                        columns={"OPP_ABBR": "Opp"}
+                    ),
+                    hide_index=True,
+                    use_container_width=True,
+                )
+            else:
+                # Fallback to schedule-agnostic projection when schedule not in DB
+                proj = team_next10_projection(rs_df, features_df, team_abbr)
+                n_available = proj["games_available"]
+                st.metric(
+                    f"Next {n_available} Projected W-L",
+                    value=f"{proj['projected_wins']:.1f}W – {proj['projected_losses']:.1f}L",
+                )
+                st.caption(
+                    f"Range: {proj['range_low']}–{proj['range_high']} wins. "
+                    "Based on team strength vs league average — schedule not yet in DB."
+                )
 
         st.markdown("<div class='section-label'>Player Stats (Current Season)</div>", unsafe_allow_html=True)
         players = player_summary(player_rs_df, team_abbr)
