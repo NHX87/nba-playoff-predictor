@@ -74,10 +74,12 @@ function renderMetadata(meta, oddsRows) {
   if (updatedEl) updatedEl.textContent = stamp;
 }
 
+const RAW_BASE = "https://raw.githubusercontent.com/NHX87/nba-playoff-predictor/main";
+
 async function hydratePortfolio() {
   const [meta, oddsCsv] = await Promise.all([
-    safeFetchJSON("../models/trained/simulation_metadata.json"),
-    safeFetchText("../models/trained/simulation_team_odds_current.csv"),
+    safeFetchJSON(`${RAW_BASE}/models/trained/simulation_metadata.json`),
+    safeFetchText(`${RAW_BASE}/models/trained/simulation_team_odds_current.csv`),
   ]);
 
   const oddsRows = oddsCsv ? parseCSV(oddsCsv) : [];

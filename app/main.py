@@ -250,6 +250,13 @@ def load_base_tables() -> dict[str, pd.DataFrame]:
             FROM team_projected_record
             WHERE SEASON = '{CURRENT_SEASON_STR}'
         """,
+        "daily_model_scores": f"""
+            SELECT GAME_DATE, TEAM_ABBR, games_played, preseason_prob,
+                   model_title_prob, title_prob_blended
+            FROM daily_model_scores
+            WHERE SEASON = '{CURRENT_SEASON_STR}'
+            ORDER BY TEAM_ABBR, GAME_DATE
+        """,
     }
 
     try:
@@ -269,6 +276,7 @@ def load_base_tables() -> dict[str, pd.DataFrame]:
             "features": "model_features",
             "remaining_games": "team_remaining_games",
             "projected_records": "team_projected_record",
+            "daily_model_scores": "daily_model_scores",
         }
         for key, sql in queries.items():
             out[key] = con.execute(sql).df() if mapping[key] in tables else pd.DataFrame()
@@ -284,17 +292,22 @@ def load_base_tables() -> dict[str, pd.DataFrame]:
     if not out.get("remaining_games", pd.DataFrame()).empty:
         out["remaining_games"]["GAME_DATE"] = _to_dt(out["remaining_games"]["GAME_DATE"])
 
+    if not out.get("daily_model_scores", pd.DataFrame()).empty:
+        out["daily_model_scores"]["GAME_DATE"] = _to_dt(out["daily_model_scores"]["GAME_DATE"])
+
     return out
 
 
 def build_team_title_odds_series(
     rs_df: pd.DataFrame, title_df: pd.DataFrame, team_abbr: str
 ) -> pd.DataFrame:
-    """Build implied title odds trajectory from RS win% + net rating softmax.
+    """Build implied title odds trajectory anchored to current Monte Carlo odds.
 
-    Shows the raw relative strength of this team vs all 30 teams on each game
-    date — no endpoint scaling so historical values reflect what the model
-    would have said at that point in the season.
+    Shape comes from RS win% + net rating softmax with Bayesian shrinkage
+    (20-game prior toward .500) to damp early-season small-sample spikes.
+    The entire series is then scaled so the final point equals the team's
+    current Monte Carlo title probability — preventing October 3-0 starts
+    from inflating odds to 40% when actual odds were ~2-3%.
     """
     if rs_df.empty:
         return pd.DataFrame()
@@ -308,10 +321,13 @@ def build_team_title_odds_series(
 
     season["gp"] = season.groupby("TEAM_ABBR").cumcount() + 1
     season["cum_wins"] = season.groupby("TEAM_ABBR")["win"].cumsum()
-    season["cum_win_pct"] = season["cum_wins"] / season["gp"]
+    # Bayesian shrinkage: blend cumulative win% toward .500 with a 20-game prior.
+    # At gp=3, a 3-0 team shows 0.565 not 1.000, eliminating early spikes.
+    _prior = 20
+    season["shrunk_win_pct"] = (season["cum_wins"] + _prior * 0.5) / (season["gp"] + _prior)
     season["cum_pm"] = season.groupby("TEAM_ABBR")["pm"].cumsum() / season["gp"]
 
-    season["strength"] = (season["cum_win_pct"] - 0.5) * 7.0 + (season["cum_pm"] * 0.07)
+    season["strength"] = (season["shrunk_win_pct"] - 0.5) * 7.0 + (season["cum_pm"] * 0.07)
     season["strength"] = season["strength"].clip(-6, 6)
 
     daily = (
@@ -333,13 +349,23 @@ def build_team_title_odds_series(
     if team_daily.empty:
         return pd.DataFrame()
 
-    # Smooth for readability without distorting historical shape.
+    # Smooth for readability.
     smoothed = team_daily["implied_title_prob"].ewm(span=6, adjust=False).mean()
     team_daily["title_odds_smoothed"] = np.clip(smoothed, 0, 1)
 
+    # Look up current Monte Carlo title odds (used as reference line in chart, not for scaling).
+    # Endpoint scaling distorts early values for teams whose standing has shifted over the season;
+    # it's more honest to show shrinkage-dampened relative strength + a separate MC reference.
+    mc_prob = None
+    if title_df is not None and not title_df.empty and "title_prob" in title_df.columns:
+        mc_row = title_df[title_df["TEAM_ABBR"] == team_abbr]
+        if not mc_row.empty:
+            mc_prob = float(mc_row.iloc[0]["title_prob"])
+
     team_daily["title_odds_pct"] = team_daily["implied_title_prob"] * 100.0
     team_daily["title_odds_smoothed_pct"] = team_daily["title_odds_smoothed"] * 100.0
-    return team_daily[["GAME_DATE", "title_odds_pct", "title_odds_smoothed_pct"]]
+    team_daily["mc_title_prob_pct"] = (mc_prob * 100.0) if mc_prob is not None else None
+    return team_daily[["GAME_DATE", "title_odds_pct", "title_odds_smoothed_pct", "mc_title_prob_pct"]]
 
 
 def get_daily_scoreboard(rs_df: pd.DataFrame, day: pd.Timestamp) -> pd.DataFrame:
@@ -1140,6 +1166,7 @@ current_preds_df = tables.get("current_preds", pd.DataFrame())
 features_df = tables.get("features", pd.DataFrame())
 remaining_games_df = tables.get("remaining_games", pd.DataFrame())
 projected_records_df = tables.get("projected_records", pd.DataFrame())
+daily_model_scores_df = tables.get("daily_model_scores", pd.DataFrame())
 
 
 def build_analyst_context() -> str:
@@ -1730,43 +1757,114 @@ with team_tab:
 
         c1, c2 = st.columns([1.45, 1.0])
         with c1:
-            st.markdown("<div class='section-label'>Odds Over Time (Current Season)</div>", unsafe_allow_html=True)
-            render_meta_chips(
-                [
-                    ("Metric", "Implied title odds path"),
-                    ("Source", "regular_season (win% + net rating softmax)"),
-                    ("Smoothing", "EWM span=6"),
-                ]
-            )
-            traj = build_team_title_odds_series(rs_df, title_df, team_abbr)
+            st.markdown("<div class='section-label'>Title Odds Over Time (Current Season)</div>", unsafe_allow_html=True)
             line_color = TEAM_COLORS.get(team_abbr, "#35a7ff")
 
-            fig = go.Figure()
-            if not traj.empty:
+            # Use pre-computed daily CoxPH model scores from the pipeline.
+            # Falls back to the simple win%+softmax function if table isn't loaded yet.
+            team_scores = (
+                daily_model_scores_df[daily_model_scores_df["TEAM_ABBR"] == team_abbr]
+                .sort_values("GAME_DATE")
+                if not daily_model_scores_df.empty else pd.DataFrame()
+            )
+
+            if not team_scores.empty:
+                render_meta_chips(
+                    [
+                        ("Metric", "CoxPH model title odds"),
+                        ("Preseason", f"{team_scores['preseason_prob'].iloc[0]*100:.1f}% Vegas prior"),
+                        ("Blend", "prior fades out over first 40 games"),
+                    ]
+                )
+                # Smooth for display
+                raw = team_scores["title_prob_blended"] * 100
+                smoothed = raw.ewm(span=6, adjust=False).mean()
+                team_scores = team_scores.copy()
+                team_scores["smoothed_pct"] = smoothed.values
+
+                # Current MC title odds for reference line
+                mc_val = None
+                if title_df is not None and not title_df.empty and "title_prob" in title_df.columns:
+                    mc_row = title_df[title_df["TEAM_ABBR"] == team_abbr]
+                    if not mc_row.empty:
+                        mc_val = float(mc_row.iloc[0]["title_prob"]) * 100
+
+                fig = go.Figure()
                 fig.add_trace(
                     go.Scatter(
-                        x=traj["GAME_DATE"],
-                        y=traj["title_odds_smoothed_pct"],
+                        x=team_scores["GAME_DATE"],
+                        y=team_scores["smoothed_pct"],
                         mode="lines",
                         name=f"{team_abbr} title odds",
                         line=dict(color=line_color, width=3, shape="spline", smoothing=1.0),
                     )
                 )
-
-            fig.update_layout(
-                height=360,
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(0,0,0,0)",
-                font_color="#111827",
-                margin=dict(l=10, r=10, t=10, b=10),
-                showlegend=False,
-                yaxis=dict(title="Title Odds (%)", color=line_color, ticksuffix="%", gridcolor="#E4E7EE"),
-                xaxis=dict(title="Date", gridcolor="#E4E7EE"),
-            )
-            st.plotly_chart(fig, use_container_width=True)
-            st.caption(
-                "Implied title odds based on RS win% + net rating softmax vs all 30 teams on each game date. Reflects actual relative strength at each point in the season."
-            )
+                if mc_val is not None:
+                    fig.add_hline(
+                        y=mc_val,
+                        line=dict(color=line_color, width=1.5, dash="dash"),
+                        annotation_text=f"MC sim: {mc_val:.1f}%",
+                        annotation_position="top right",
+                        annotation_font_color=line_color,
+                    )
+                fig.update_layout(
+                    height=360,
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    font_color="#111827",
+                    margin=dict(l=10, r=10, t=10, b=10),
+                    showlegend=False,
+                    yaxis=dict(title="Title Probability (%)", color=line_color, ticksuffix="%", gridcolor="#E4E7EE"),
+                    xaxis=dict(title="Date", gridcolor="#E4E7EE"),
+                )
+                st.plotly_chart(fig, use_container_width=True)
+                st.caption(
+                    "CoxPH model title probability estimated at each game date using cumulative season features. "
+                    "Starts at preseason Vegas odds (Bayesian prior) and transitions to model output over the first 40 games. "
+                    "Dashed line = current Monte Carlo simulation title probability."
+                )
+            else:
+                # Fallback: simple softmax trajectory (used before daily_model_scores is available)
+                render_meta_chips(
+                    [
+                        ("Metric", "Relative title likelihood path"),
+                        ("Source", "RS win% + net rating softmax (Bayesian-shrunk)"),
+                        ("Reference", "dashed line = current MC title odds"),
+                    ]
+                )
+                traj = build_team_title_odds_series(rs_df, title_df, team_abbr)
+                fig = go.Figure()
+                if not traj.empty:
+                    fig.add_trace(
+                        go.Scatter(
+                            x=traj["GAME_DATE"],
+                            y=traj["title_odds_smoothed_pct"],
+                            mode="lines",
+                            name=f"{team_abbr} title odds",
+                            line=dict(color=line_color, width=3, shape="spline", smoothing=1.0),
+                        )
+                    )
+                    mc_val = traj["mc_title_prob_pct"].iloc[-1] if "mc_title_prob_pct" in traj.columns else None
+                    if mc_val is not None and not pd.isna(mc_val):
+                        fig.add_hline(
+                            y=float(mc_val),
+                            line=dict(color=line_color, width=1.5, dash="dash"),
+                            annotation_text=f"MC: {mc_val:.1f}%",
+                            annotation_position="top right",
+                            annotation_font_color=line_color,
+                        )
+                fig.update_layout(
+                    height=360,
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    font_color="#111827",
+                    margin=dict(l=10, r=10, t=10, b=10),
+                    showlegend=False,
+                    yaxis=dict(title="Title Probability (%)", color=line_color, ticksuffix="%", gridcolor="#E4E7EE"),
+                    xaxis=dict(title="Date", gridcolor="#E4E7EE"),
+                )
+                st.plotly_chart(fig, use_container_width=True)
+                st.caption("Relative title likelihood from RS win% + net rating softmax. Dashed line = current MC title odds.")
 
         with c2:
             st.markdown("<div class='section-label'>Last 10 + Next 10</div>", unsafe_allow_html=True)

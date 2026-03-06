@@ -140,6 +140,7 @@ jobs:
               "team_remaining_games",   # per-game win probs for upcoming opponents
               "team_projected_record",  # Monte Carlo projected final records + seed probs
               "model_features",         # 5 FINAL_FEATURES for team drilldown + analyst
+              "daily_model_scores",     # historical CoxPH scores per team per game date
           ]
 
           src = duckdb.connect("data/processed/nba.duckdb", read_only=True)

@@ -96,10 +96,25 @@ main,
 
 .nav-links {
   display: flex;
+  align-items: center;
   gap: 1rem;
   color: var(--muted);
   font-size: 0.92rem;
 }
+
+.nav-gh {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.28rem 0.75rem;
+  font-weight: 600;
+  color: var(--ink) !important;
+  transition: border-color 0.2s;
+}
+
+.nav-gh:hover { border-color: var(--brand); }
 
 .hero {
   padding: 3.2rem 0 2rem;
@@ -136,6 +151,9 @@ main,
 }
 
 .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
   border-radius: 999px;
   padding: 0.7rem 1.1rem;
   font-weight: 600;
@@ -343,6 +361,137 @@ code {
   color: #1e2a42;
 }
 
+/* ── Section copy ──────────────────────────────────────────── */
+.section-copy {
+  margin: 0.45rem 0 0;
+  color: var(--muted);
+  font-size: 0.97rem;
+  line-height: 1.6;
+  max-width: 760px;
+}
+
+/* ── Model cards ───────────────────────────────────────────── */
+.model-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.9rem;
+  margin-bottom: 2.8rem;
+}
+
+.model-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 12px 26px rgba(15, 23, 42, 0.06);
+  padding: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.model-badge {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 0.2rem 0.65rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-bottom: 0.35rem;
+}
+
+.model-badge.survival   { background: #e6efff; color: var(--brand); }
+.model-badge.matchup    { background: #e6fff8; color: #0d7a6a; }
+.model-badge.simulation { background: #fff4e6; color: #9a4e0d; }
+.model-badge.series-len { background: #f5e6ff; color: #6b21a8; }
+.model-badge.schedule   { background: #e6f4ff; color: #0369a1; }
+
+.model-card h3 {
+  font-size: 1rem;
+  margin: 0;
+}
+
+.model-role {
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+  font-size: 0.87rem;
+  line-height: 1.45;
+}
+
+.model-kpi-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
+  padding: 0.65rem 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.model-kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.kpi-value {
+  font-family: "Outfit", sans-serif;
+  font-weight: 700;
+  font-size: 1.1rem;
+  color: var(--ink);
+  line-height: 1.1;
+}
+
+.kpi-label {
+  font-size: 0.68rem;
+  color: var(--muted);
+  line-height: 1.3;
+}
+
+.model-rationale {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.55;
+  flex: 1;
+}
+
+.model-features {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: auto;
+  padding-top: 0.25rem;
+}
+
+.model-features span {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.18rem 0.48rem;
+  font-size: 0.73rem;
+  color: var(--ink);
+  font-weight: 500;
+}
+
+/* ── Validation bar (LOYO accuracy) ────────────────────────── */
+.loyo-bar-wrap {
+  margin-top: 0.25rem;
+}
+
+.loyo-bar-track {
+  background: var(--line);
+  border-radius: 4px;
+  height: 5px;
+  overflow: hidden;
+  margin-top: 0.2rem;
+}
+
+.loyo-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--brand), var(--accent));
+}
+
 .site-footer {
   margin-top: 2.6rem;
   padding: 1.1rem 0 1.8rem;
@@ -353,9 +502,15 @@ code {
   padding-top: 0.8rem;
   display: flex;
   justify-content: space-between;
+  align-items: center;
   gap: 1rem;
   color: var(--muted);
   font-size: 0.9rem;
+}
+
+.footer-links {
+  display: flex;
+  gap: 1.2rem;
 }
 
 @media (max-width: 980px) {
@@ -368,6 +523,10 @@ code {
 
   .flow-grid {
     grid-template-columns: 1fr 1fr 1fr;
+  }
+
+  .model-grid {
+    grid-template-columns: 1fr 1fr;
   }
 }
 
@@ -392,7 +551,8 @@ code {
   .cards-grid,
   .outputs-grid,
   .code-grid,
-  .flow-grid {
+  .flow-grid,
+  .model-grid {
     grid-template-columns: 1fr;
   }
 

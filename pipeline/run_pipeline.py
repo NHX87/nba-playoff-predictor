@@ -29,6 +29,7 @@ from pipeline.ingestion.fetch_players import fetch_all_player_logs
 from pipeline.ingestion.fetch_series import fetch_all_series
 from pipeline.ingestion.load_db import load_to_duckdb
 from pipeline.ingestion.validate import _print_report, run_validation
+from pipeline.models.historical_scores import compute_daily_model_scores
 from pipeline.models.matchup_model import train_matchup_model
 from pipeline.models.predict_current import predict_current_season
 from pipeline.models.sanity_report import generate_sanity_report
@@ -120,6 +121,7 @@ def main() -> None:
     if args.with_current_projections:
         _run_stage(Stage("Predict current season field", predict_current_season))
         _run_stage(Stage("Run Monte Carlo simulation", run_simulation))
+        _run_stage(Stage("Compute daily historical model scores", compute_daily_model_scores))
 
     if args.with_remaining_schedule:
         from pipeline.models.remaining_schedule import build_remaining_schedule
