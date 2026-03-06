@@ -18,9 +18,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install dependencies
         run: pip install -r requirements.txt
+
+      - name: Bust 2025-26 cache
+        run: rm -f data/raw/*2025-26*.parquet
 
       - name: Fetch 2025-26 game + player logs
         run: |
@@ -32,8 +37,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data/raw/*2025-26*.parquet
-          git diff --cached --quiet || git commit -m "chore: refresh 2025-26 parquets"
-          git push
+          git diff --cached --quiet && echo "Parquets unchanged, skipping commit." || (git commit -m "chore: refresh 2025-26 parquets" && git push)
 
   pipeline:
     name: Train models and push to HF Spaces
