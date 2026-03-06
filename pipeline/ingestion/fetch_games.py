@@ -59,6 +59,9 @@ def fetch_team_game_logs(season: str, season_type: str = "Regular Season") -> pd
 
     if cache_file.exists():
         cached = pd.read_parquet(cache_file)
+        if cached.empty:
+            print(f"  Cache hit: {cache_file.name} (empty — season not started)")
+            return cached
         print(
             f"  Cache hit: {cache_file.name} "
             f"({len(cached):,} rows, {cached['TEAM_ID'].nunique()} teams)"
