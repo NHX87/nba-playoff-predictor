@@ -1146,18 +1146,19 @@ with playin_tab:
                                 zone = '<span style="background:#F3F4F6;color:#6B7280;border-radius:4px;padding:1px 6px;font-size:0.75rem;font-weight:700;">OUT</span>'
 
                             hot = _hot_streak(abbr)
-                            rows_html += f"""
-                            <div style="display:flex;align-items:center;gap:0.5rem;padding:0.3rem 0;border-bottom:1px solid #F3F4F6;flex-wrap:wrap;">
-                                <span style="color:#9CA3AF;font-size:0.8rem;width:1.4rem;text-align:right;">{seed}</span>
-                                <img src="{logo_url(abbr)}" width="20" height="20" style="border-radius:50%;" />
-                                <span style="font-weight:700;font-size:0.9rem;width:2.5rem;">{abbr}</span>
-                                <span style="color:#374151;font-size:0.85rem;width:4rem;">{record}</span>
-                                {proj_str}
-                                <span style="color:#9CA3AF;font-size:0.8rem;width:3rem;">{gb_str} GB</span>
-                                {zone}
-                                {seed_risk_badge}
-                                <span style="margin-left:auto;">{hot}</span>
-                            </div>"""
+                            rows_html += (
+                                '<div style="display:flex;align-items:center;gap:0.5rem;padding:0.3rem 0;border-bottom:1px solid #F3F4F6;flex-wrap:wrap;">'
+                                f'<span style="color:#9CA3AF;font-size:0.8rem;width:1.4rem;text-align:right;">{seed}</span>'
+                                f'<img src="{logo_url(abbr)}" width="20" height="20" style="border-radius:50%;" />'
+                                f'<span style="font-weight:700;font-size:0.9rem;width:2.5rem;">{abbr}</span>'
+                                f'<span style="color:#374151;font-size:0.85rem;width:4rem;">{record}</span>'
+                                f'{proj_str}'
+                                f'<span style="color:#9CA3AF;font-size:0.8rem;width:3rem;">{gb_str} GB</span>'
+                                f'{zone}'
+                                f'{seed_risk_badge}'
+                                f'<span style="margin-left:auto;">{hot}</span>'
+                                '</div>'
+                            )
                         st.markdown(
                             f'<div style="background:#FAFAFA;border:1px solid #E4E7EE;border-radius:8px;padding:0.5rem 0.75rem;margin-bottom:1rem;">{rows_html}</div>',
                             unsafe_allow_html=True,
