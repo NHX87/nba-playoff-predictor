@@ -42,9 +42,11 @@ jobs:
           python -m pipeline.ingestion.fetch_players
 
       - name: Commit updated parquets if data changed
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           python - <<'EOF'
-          import pandas as pd, glob, json, subprocess, sys
+          import os, pandas as pd, glob, json, subprocess, sys
 
           before = json.loads(open("/tmp/before_counts.txt").read())
           after  = {f: len(pd.read_parquet(f)) for f in glob.glob("data/raw/*2025-26*.parquet")}
@@ -54,8 +56,11 @@ jobs:
               sys.exit(0)
 
           print(f"Data changed: {before} -> {after}")
+          token = os.environ["GITHUB_TOKEN"]
           subprocess.run(["git", "config", "user.name",  "github-actions[bot]"], check=True)
           subprocess.run(["git", "config", "user.email", "github-actions[bot]@users.noreply.github.com"], check=True)
+          subprocess.run(["git", "remote", "set-url", "origin",
+              f"https://x-access-token:{token}@github.com/NHX87/nba-playoff-predictor.git"], check=True)
           subprocess.run(["git", "add"] + glob.glob("data/raw/*2025-26*.parquet"), check=True)
           subprocess.run(["git", "commit", "-m", "chore: refresh 2025-26 parquets"], check=True)
           subprocess.run(["git", "push"], check=True)
