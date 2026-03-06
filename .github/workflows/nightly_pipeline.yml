@@ -10,13 +10,39 @@ env:
   PYTHON_VERSION: "3.12"
 
 jobs:
-  pipeline:
-    runs-on: ubuntu-latest
-    timeout-minutes: 180
+  fetch:
+    name: Fetch current season data
+    runs-on: self-hosted        # Mac Mini — home IP not blocked by stats.nba.com
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Fetch 2025-26 game + player logs
+        run: |
+          python -m pipeline.ingestion.fetch_games
+          python -m pipeline.ingestion.fetch_players
+
+      - name: Commit updated parquets
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/raw/*2025-26*.parquet
+          git diff --cached --quiet || git commit -m "chore: refresh 2025-26 parquets"
+          git push
+
+  pipeline:
+    name: Train models and push to HF Spaces
+    runs-on: ubuntu-latest
+    needs: fetch
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main              # pick up the parquet commit from fetch job
 
       - name: Set up Python
         uses: actions/setup-python@v5
