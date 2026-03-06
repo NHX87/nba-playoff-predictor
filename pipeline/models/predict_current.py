@@ -98,18 +98,28 @@ def _load_team_lookup(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     return lookup
 
 
+def _compute_conference_rank(df: pd.DataFrame) -> pd.DataFrame:
+    """Assign clean 1-15 conference standing rank by wins desc, win_pct desc tiebreak."""
+    df = df.copy()
+    df["playoff_rank"] = (
+        df.sort_values(["conference", "wins", "win_pct"], ascending=[True, False, False])
+        .groupby("conference")
+        .cumcount() + 1
+    )
+    df["in_playoff_top6"] = df["playoff_rank"] <= 6
+    df["in_play_in"] = df["playoff_rank"].between(7, 10, inclusive="both")
+    df["in_top8_by_standings"] = df["playoff_rank"] <= 8
+    return df
+
+
 def _fetch_standings_from_api(team_lookup: pd.DataFrame) -> pd.DataFrame:
     """Fetch live standings from stats.nba.com. Raises on timeout/error."""
     raw = leaguestandingsv3.LeagueStandingsV3(
         season=CURRENT_SEASON_STR, timeout=60
     ).get_data_frames()[0]
 
-    keep = raw[
-        ["TeamID", "Conference", "PlayoffRank", "WINS", "LOSSES", "WinPCT", "Record"]
-    ].copy()
+    keep = raw[["TeamID", "Conference", "WINS", "LOSSES", "WinPCT", "Record"]].copy()
     keep = keep.rename(columns={"TeamID": "TEAM_ID", "WINS": "wins", "LOSSES": "losses", "WinPCT": "win_pct"})
-    keep["playoff_rank"] = pd.to_numeric(keep["PlayoffRank"], errors="coerce")
-    keep = keep.drop(columns=["PlayoffRank"])
 
     merged = keep.merge(team_lookup[["TEAM_ID", "TEAM_ABBR"]], on="TEAM_ID", how="left")
     missing_abbr = merged["TEAM_ABBR"].isna().sum()
@@ -118,10 +128,7 @@ def _fetch_standings_from_api(team_lookup: pd.DataFrame) -> pd.DataFrame:
 
     merged["conference"] = merged["Conference"].str.title()
     merged = merged.drop(columns=["Conference"])
-    merged["in_playoff_top6"] = merged["playoff_rank"] <= 6
-    merged["in_play_in"] = merged["playoff_rank"].between(7, 10, inclusive="both")
-    merged["in_top8_by_standings"] = merged["playoff_rank"] <= 8
-    return merged
+    return _compute_conference_rank(merged)
 
 
 def _get_current_standings(team_lookup: pd.DataFrame) -> pd.DataFrame:
@@ -137,9 +144,8 @@ def _get_current_standings(team_lookup: pd.DataFrame) -> pd.DataFrame:
     if STANDINGS_CACHE_PATH.exists():
         print(f"  Falling back to cached standings: {STANDINGS_CACHE_PATH}")
         cached = pd.read_csv(STANDINGS_CACHE_PATH)
-        for col in ("in_playoff_top6", "in_play_in", "in_top8_by_standings"):
-            if col in cached.columns:
-                cached[col] = cached[col].astype(bool)
+        # Recompute clean 1-15 rank from wins/win_pct (overrides any stale PlayoffRank)
+        cached = _compute_conference_rank(cached)
         return cached
 
     raise RuntimeError(
