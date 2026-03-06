@@ -63,7 +63,13 @@ jobs:
           subprocess.run(["git", "config", "user.email", "github-actions[bot]@users.noreply.github.com"], check=True)
           subprocess.run(["git", "remote", "set-url", "origin",
               f"https://x-access-token:{token}@github.com/NHX87/nba-playoff-predictor.git"], check=True)
-          subprocess.run(["git", "add"] + glob.glob("data/raw/*2025-26*.parquet"), check=True)
+          # Use data/raw/ so deletions (e.g. playoffs file not yet available) are also staged
+          subprocess.run(["git", "add", "data/raw/"], check=True)
+          # Skip commit if nothing staged (shouldn't happen here but guard anyway)
+          diff = subprocess.run(["git", "diff", "--cached", "--quiet"])
+          if diff.returncode == 0:
+              print("Nothing staged after add — skipping commit.")
+              sys.exit(0)
           subprocess.run(["git", "commit", "-m", "chore: refresh 2025-26 parquets"], check=True)
           subprocess.run(["git", "push"], check=True)
           EOF
