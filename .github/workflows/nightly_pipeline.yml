@@ -71,7 +71,11 @@ jobs:
               print("Nothing staged after add — skipping commit.")
               sys.exit(0)
           subprocess.run(["git", "commit", "-m", "chore: refresh 2025-26 parquets"], check=True)
+          # Stash any other local modifications (e.g. notebooks on the Mac Mini runner)
+          # so that rebase has a clean working tree to work with.
+          subprocess.run(["git", "stash"])
           subprocess.run(["git", "pull", "--rebase"], check=True)
+          subprocess.run(["git", "stash", "pop"])
           subprocess.run(["git", "push"], check=True)
           EOF
 
