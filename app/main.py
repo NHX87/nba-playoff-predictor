@@ -895,7 +895,7 @@ def add_theme() -> None:
             background: var(--bg);
         }
         h1, h2, h3, h4 { font-family: 'Sora', sans-serif; color: var(--ink); }
-        .block-container { padding-top: 1.2rem; }
+        .block-container { padding-top: 3.5rem; }
 
         .hero {
             border: none;
@@ -1071,7 +1071,7 @@ def add_theme() -> None:
             .block-container {
                 padding-left: 0.75rem !important;
                 padding-right: 0.75rem !important;
-                padding-top: 0.5rem !important;
+                padding-top: 3.5rem !important;
                 max-width: 100vw !important;
                 overflow-x: hidden !important;
             }
@@ -1436,8 +1436,6 @@ render_meta_chips(
         ("Score source", live_status),
     ]
 )
-
-render_selected_game_info(live_games_df, live_leaders_df)
 
 with st.sidebar:
     st.header("Live / Recent Scores")
