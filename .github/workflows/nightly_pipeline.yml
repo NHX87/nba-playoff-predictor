@@ -14,6 +14,8 @@ jobs:
     name: Fetch current season data
     runs-on: self-hosted        # Mac Mini — home IP not blocked by stats.nba.com
     timeout-minutes: 30
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout
