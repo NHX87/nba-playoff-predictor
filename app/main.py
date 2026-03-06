@@ -1179,7 +1179,9 @@ with playin_tab:
                     if not current_preds_df.empty:
                         match = current_preds_df[current_preds_df["TEAM_ABBR"] == row.team_abbr]
                         if not match.empty:
-                            seed_num = f"#{int(match.iloc[0]['playoff_seed'])} · "
+                            raw_seed = match.iloc[0]['playoff_seed']
+                            if raw_seed == raw_seed:  # not NaN
+                                seed_num = f"#{int(raw_seed)} · "
                     st.markdown(
                         f"""
                         <div style="
