@@ -98,13 +98,45 @@ jobs:
       - name: Run pipeline
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          DB_PATH: data/processed/nba_app.duckdb
         run: |
           python -m pipeline.run_pipeline \
             --skip-fetch \
             --with-model \
             --with-current-projections \
             --with-sanity-report
+
+      - name: Export app tables to nba_app.duckdb
+        run: |
+          python - <<'EOF'
+          import duckdb
+
+          APP_TABLES = [
+              "app_title_odds_current",
+              "app_series_predictions_current",
+              "app_playoff_field_current",
+              "app_play_in_current",
+              "loyo_season_summary",
+              "loyo_series_predictions",
+              "current_season_predictions",
+              "current_feature_snapshot",
+          ]
+
+          src = duckdb.connect("data/processed/nba.duckdb", read_only=True)
+          dst = duckdb.connect("data/processed/nba_app.duckdb")
+
+          for table in APP_TABLES:
+              try:
+                  df = src.execute(f"SELECT * FROM {table}").df()
+                  dst.execute(f"DROP TABLE IF EXISTS {table}")
+                  dst.execute(f"CREATE TABLE {table} AS SELECT * FROM df")
+                  print(f"  {table}: {len(df)} rows")
+              except Exception as e:
+                  print(f"  Warning: {table} skipped — {e}")
+
+          src.close()
+          dst.close()
+          print("Export complete.")
+          EOF
 
       - name: Push artifacts to Hugging Face Spaces
         env:
