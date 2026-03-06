@@ -95,6 +95,22 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt huggingface_hub
 
+      - name: Create empty 2025-26 Playoffs placeholders
+        run: |
+          python - <<'EOF'
+          import pandas as pd
+          from pathlib import Path
+          # If playoffs haven't started yet, no cache file exists and fetch would hit the API.
+          # Write empty parquets so the cache check passes and the API call is skipped.
+          for fname in [
+              "data/raw/games_2025-26_Playoffs.parquet",
+              "data/raw/player_logs_2025-26_Playoffs.parquet",
+          ]:
+              if not Path(fname).exists():
+                  pd.DataFrame().to_parquet(fname, index=False)
+                  print(f"Created empty placeholder: {fname}")
+          EOF
+
       - name: Run pipeline
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
