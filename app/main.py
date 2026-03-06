@@ -596,7 +596,7 @@ def render_selected_game_info(games_df: pd.DataFrame, leaders_df: pd.DataFrame) 
                     },
                 ]
             ),
-            width="stretch",
+            use_container_width=True,
             hide_index=True,
         )
 
@@ -619,7 +619,7 @@ def render_selected_game_info(games_df: pd.DataFrame, leaders_df: pd.DataFrame) 
                 players_df = players_df[players_df["Team"] == team_filter].copy()
             st.dataframe(
                 players_df,
-                width="stretch",
+                use_container_width=True,
                 hide_index=True,
                 column_config={
                     "PTS": st.column_config.NumberColumn("PTS", format="%d"),
@@ -1040,6 +1040,57 @@ def add_theme() -> None:
             .br-card.to-right::after, .br-card.to-left::before { display: none; }
         }
 
+        @media (max-width: 768px) {
+            /* Reduce main container padding */
+            .block-container {
+                padding-left: 0.75rem !important;
+                padding-right: 0.75rem !important;
+                padding-top: 0.5rem !important;
+                max-width: 100vw !important;
+                overflow-x: hidden !important;
+            }
+
+            /* Shrink hero */
+            .hero-title { font-size: 1.25rem !important; }
+            .hero-sub { font-size: 0.85rem !important; }
+
+            /* Tab bar: horizontal scroll instead of wrapping */
+            .stTabs [data-baseweb="tab-list"] {
+                overflow-x: auto !important;
+                flex-wrap: nowrap !important;
+                scrollbar-width: none !important;
+                -webkit-overflow-scrolling: touch !important;
+                padding-bottom: 0 !important;
+            }
+            .stTabs [data-baseweb="tab-list"]::-webkit-scrollbar { display: none !important; }
+            .stTabs [data-baseweb="tab"] {
+                white-space: nowrap !important;
+                font-size: 0.8rem !important;
+                padding: 0.2rem 0.05rem 0.35rem !important;
+            }
+
+            /* Stack all st.columns() on mobile */
+            [data-testid="stHorizontalBlock"] {
+                flex-wrap: wrap !important;
+                gap: 0.25rem 0 !important;
+            }
+            [data-testid="column"] {
+                width: 100% !important;
+                flex: 1 1 100% !important;
+                min-width: 0 !important;
+            }
+
+            /* Bracket inner sides: stack R1/R2/R3 vertically */
+            .bracket-side { flex-direction: column !important; }
+            .br-col.r1, .br-col.r2, .br-col.r3 { padding-top: 0 !important; }
+
+            /* Sidebar button: keep it reachable */
+            [data-testid="stSidebarCollapseButton"] { display: block !important; }
+
+            /* Meta chips smaller on mobile */
+            .meta-chip { font-size: 0.72rem !important; padding: 0.15rem 0.35rem !important; }
+        }
+
         .stTabs [data-baseweb="tab-list"] {
             gap: 1.15rem;
             border-bottom: 1px solid var(--line);
@@ -1074,7 +1125,7 @@ st.set_page_config(
     page_title="NBA Playoff Predictor",
     page_icon="🏀",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="auto",
 )
 add_theme()
 
@@ -1712,7 +1763,7 @@ with team_tab:
                 yaxis=dict(title="Title Odds (%)", color=line_color, ticksuffix="%", gridcolor="#E4E7EE"),
                 xaxis=dict(title="Date", gridcolor="#E4E7EE"),
             )
-            st.plotly_chart(fig, width="stretch")
+            st.plotly_chart(fig, use_container_width=True)
             st.caption(
                 "Implied title odds based on RS win% + net rating softmax vs all 30 teams on each game date. Reflects actual relative strength at each point in the season."
             )
@@ -1730,7 +1781,7 @@ with team_tab:
                     last10[["GAME_DATE", "MATCHUP", "WL", "PTS", "REB", "AST", "PLUS_MINUS"]]
                     .sort_values("GAME_DATE", ascending=False)
                     .assign(GAME_DATE=lambda d: d["GAME_DATE"].dt.strftime("%Y-%m-%d")),
-                    width="stretch",
+                    use_container_width=True,
                     hide_index=True,
                 )
 
@@ -1798,7 +1849,7 @@ with team_tab:
         else:
             st.dataframe(
                 players,
-                width="stretch",
+                use_container_width=True,
                 hide_index=True,
                 column_config={
                     "MIN": st.column_config.NumberColumn("MIN", format="%.1f"),
