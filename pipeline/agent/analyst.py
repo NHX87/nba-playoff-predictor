@@ -3,12 +3,10 @@ analyst.py
 ----------
 Claude-powered NBA analyst agent.
 
-Takes model outputs (team probabilities, physicality scores, 
-bracket simulation results) and generates:
+Takes model outputs (team probabilities, standings, bracket simulation results,
+player stats, projected records) and generates:
   - Team scouting reports
-  - "Why" explanations for predictions  
-  - Scenario analysis based on physicality slider setting
-  - Historical comparisons
+  - "Why" explanations for predictions
   - Conversational Q&A about the model and predictions
 """
 
@@ -17,27 +15,29 @@ from config.settings import ANTHROPIC_API_KEY, AGENT_MODEL, AGENT_MAX_TOKENS
 
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
-SYSTEM_PROMPT = """You are an NBA playoff analyst embedded in a data-driven prediction model.
+SYSTEM_PROMPT = """You are an NBA playoff analyst embedded in a data-driven prediction model for the 2025-26 season.
 
-Your role is to explain model predictions in clear, insightful basketball terms. You have access to:
-- Team physicality scores (how much more physical each team gets in playoffs vs regular season)
-- Pace differential scores (how much teams slow down in playoffs)
-- Title probability distributions from Monte Carlo simulation
-- Historical comparisons to past playoff teams
+Your role is to explain model predictions in clear, insightful basketball terms.
 
-When explaining predictions:
+Data available to you each turn:
+- Title probability for every projected playoff team (Monte Carlo simulation, 10,000 runs)
+- Projected bracket: all matchups from First Round through Finals with series win probabilities and expected game lengths
+- Team standings: conference seed, wins/losses, net rating, offensive/defensive rating, win% vs top teams
+- Model strength score per team (Cox proportional hazards survival model — higher = stronger playoff team)
+- Projected final records: Monte Carlo expected wins with 10th/90th percentile range, and probability of auto bid / play-in / missing playoffs
+- Play-in tournament odds: probability of earning Seed 7, Seed 8, or making the playoffs at all
+- Top player stats: recent per-game averages (PPG/RPG/APG) for each team's rotation
+- Upcoming schedule: next games with projected win probabilities
+
+When answering:
 - Lead with the key insight, not the math
-- Use specific basketball concepts (half-court offense, switching defense, playoff officiating, etc.)
+- Use specific basketball concepts (half-court offense, switching defense, playoff physicality, etc.)
 - Reference historical teams and players when relevant
-- Be confident but acknowledge uncertainty
-- Keep responses concise — 3-5 sentences for most explanations, longer for full scouting reports
+- Be confident but acknowledge uncertainty where the model is close
+- Keep responses concise — 3-5 sentences for quick questions, longer for full scouting reports
+- For scouting reports: cover playoff identity, key strengths/weaknesses, likely first-round matchup, and title ceiling
 
-Physicality slider context:
-- Low physicality (0.5): Refs are calling it tight. Pace teams, free throw drawers, and perimeter play thrives.
-- Default (1.0): Historical average playoff environment
-- High physicality (2.0): Physical defense rewarded, paint presence dominant, pace teams punished.
-
-Always ground explanations in the actual data and model outputs provided.
+Always ground your answers in the actual numbers provided. Do not invent statistics.
 """
 
 
@@ -45,40 +45,100 @@ def get_team_scouting_report(
     team_name: str,
     team_stats: dict,
     title_probability: float,
-    physicality_weight: float = 1.0,
-    conversation_history: list = None
+    conversation_history: list = None,
 ) -> str:
-    """
-    Generate a narrative scouting report for a team.
-    """
+    """Generate a narrative scouting report for a team using rich team stats."""
     if conversation_history is None:
         conversation_history = []
 
-    _ps = team_stats.get('physicality_score')
-    _fd = team_stats.get('foul_rate_delta')
-    _pd = team_stats.get('pace_delta')
-    _dd = team_stats.get('dreb_pct_delta')
+    lines = [f"Team: {team_name}"]
 
-    context = f"""
-Team: {team_name}
-Title Probability: {title_probability:.1%}
-Physicality Score: {f"{_ps:.3f}" if _ps is not None else "N/A"} (higher = more physical in playoffs)
-Foul Rate Delta: {f"{_fd:.2f}" if _fd is not None else "N/A"} (regular season → playoffs)
-Pace Delta: {f"{_pd:.2f}" if _pd is not None else "N/A"} (negative = slows down in playoffs)
-Defensive Rebound Delta: {f"{_dd:.3f}" if _dd is not None else "N/A"}
-Physicality Weight Setting: {physicality_weight:.1f}x
+    if "current_record" in team_stats:
+        lines.append(
+            f"Current Record: {team_stats['current_record']} "
+            f"(Win% {team_stats.get('win_pct', 0):.3f})"
+        )
 
-Generate a concise playoff scouting report for this team based on their physicality profile and title probability.
-Include: what their metrics say about their playoff identity, how the current physicality setting affects their odds, and one historical comparison if relevant.
-"""
+    if "conf_seed" in team_stats:
+        seed_str = f"#{team_stats['conf_seed']} in conference | #{team_stats.get('overall_rank', '?')}/30 overall"
+        if "playoff_seed" in team_stats and team_stats["playoff_seed"] is not None:
+            seed_str += f" | Playoff Seed {team_stats['playoff_seed']}"
+        lines.append(f"Standing: {seed_str}")
 
+    if "projected_wins" in team_stats:
+        lines.append(
+            f"Projected Final Record: {team_stats['projected_wins']:.0f}W "
+            f"(range: {team_stats.get('proj_range', 'N/A')}) | "
+            f"Auto {team_stats.get('prob_auto', 0):.0%} | "
+            f"Play-In {team_stats.get('prob_playin', 0):.0%} | "
+            f"Miss {team_stats.get('prob_miss', 0):.0%}"
+        )
+
+    if "net_rating" in team_stats:
+        lines.append(
+            f"Net Rating: {team_stats['net_rating']:+.1f} | "
+            f"Off: {team_stats.get('off_rating', 0):.1f} | "
+            f"Def: {team_stats.get('def_rating', 0):.1f}"
+        )
+
+    if "vs_top_win_pct" in team_stats:
+        lines.append(f"Win% vs Top Teams: {team_stats['vs_top_win_pct']:.1%}")
+
+    model_feats = []
+    if "close_game_win_pct" in team_stats:
+        model_feats.append(f"Close Game Win%: {team_stats['close_game_win_pct']:.1%}")
+    if "efg_pct" in team_stats:
+        model_feats.append(f"eFG%: {team_stats['efg_pct']:.1%}")
+    if "fta_per_game" in team_stats:
+        model_feats.append(f"FTA/game: {team_stats['fta_per_game']:.1f}")
+    if model_feats:
+        lines.append("Model Features: " + " | ".join(model_feats))
+
+    if team_stats.get("survival_score") is not None:
+        lines.append(
+            f"Model Strength Score: {team_stats['survival_score']:.3f} "
+            f"(CoxPH playoff survival model — higher = stronger)"
+        )
+
+    if title_probability > 0:
+        lines.append(f"Title Probability: {title_probability:.1%}")
+
+    if "make_finals_prob" in team_stats:
+        lines.append(
+            f"Finals Probability: {team_stats['make_finals_prob']:.1%} | "
+            f"Conf Finals: {team_stats.get('make_conf_finals_prob', 0):.1%} | "
+            f"2nd Round: {team_stats.get('make_second_round_prob', 0):.1%}"
+        )
+
+    if "made_playoffs_prob" in team_stats:
+        lines.append(
+            f"Play-In Odds: Seed 7 {team_stats.get('seed7_prob', 0):.1%} | "
+            f"Seed 8 {team_stats.get('seed8_prob', 0):.1%} | "
+            f"Make Playoffs {team_stats['made_playoffs_prob']:.1%}"
+        )
+
+    if team_stats.get("top_players"):
+        lines.append("Top Players (last 10 games avg): " + " | ".join(team_stats["top_players"]))
+
+    if team_stats.get("next_games"):
+        lines.append("Next Games: " + " | ".join(team_stats["next_games"]))
+
+    lines.append(
+        "\nGenerate a concise playoff scouting report. Cover: "
+        "(1) this team's playoff identity based on their metrics, "
+        "(2) biggest strength and biggest vulnerability, "
+        "(3) most likely first-round matchup and how that plays out, "
+        "(4) realistic ceiling for this postseason."
+    )
+
+    context = "\n".join(lines)
     messages = conversation_history + [{"role": "user", "content": context}]
 
     response = client.messages.create(
         model=AGENT_MODEL,
         max_tokens=AGENT_MAX_TOKENS,
         system=SYSTEM_PROMPT,
-        messages=messages
+        messages=messages,
     )
 
     return response.content[0].text
@@ -87,26 +147,26 @@ Include: what their metrics say about their playoff identity, how the current ph
 def answer_question(
     question: str,
     model_context: dict,
-    conversation_history: list = None
+    conversation_history: list = None,
 ) -> tuple[str, list]:
     """
     Answer a user question about the model or predictions.
+    Uses full_context from model_context if available.
     Returns (answer, updated_conversation_history).
     """
     if conversation_history is None:
         conversation_history = []
 
-    # Build context string from model outputs
-    context_str = f"""
-Current model context:
-- Physicality weight: {model_context.get('physicality_weight', 1.0):.1f}x
-- Top 3 title favorites: {model_context.get('top_3', 'N/A')}
-- Biggest physicality advantage teams: {model_context.get('most_physical', 'N/A')}
-- Biggest pace-and-space teams: {model_context.get('pace_teams', 'N/A')}
-- Current season: {model_context.get('season', '2024-25')}
-
-User question: {question}
-"""
+    full_ctx = model_context.get("full_context", "")
+    if full_ctx:
+        context_str = f"{full_ctx}\nUser question: {question}"
+    else:
+        # Minimal fallback
+        context_str = (
+            f"Season: {model_context.get('season', '2025-26')}\n"
+            f"Top title favorites: {model_context.get('top_3', 'N/A')}\n"
+            f"User question: {question}"
+        )
 
     updated_history = conversation_history + [{"role": "user", "content": context_str}]
 
@@ -114,7 +174,7 @@ User question: {question}
         model=AGENT_MODEL,
         max_tokens=AGENT_MAX_TOKENS,
         system=SYSTEM_PROMPT,
-        messages=updated_history
+        messages=updated_history,
     )
 
     answer = response.content[0].text
@@ -123,56 +183,27 @@ User question: {question}
     return answer, updated_history
 
 
-def explain_physicality_shift(
-    physicality_weight: float,
-    odds_before: dict,
-    odds_after: dict
-) -> str:
-    """
-    Explain how changing the physicality slider shifted title odds.
-    """
-    # Find biggest movers
-    movers = []
-    for team in odds_before:
-        if team in odds_after:
-            delta = odds_after[team] - odds_before[team]
-            movers.append((team, delta))
-
-    movers.sort(key=lambda x: abs(x[1]), reverse=True)
-    top_movers = movers[:4]
-
-    context = f"""
-The physicality weight was adjusted to {physicality_weight:.1f}x.
-
-Biggest odds changes:
-{chr(10).join([f"- {t}: {d:+.1%}" for t, d in top_movers])}
-
-Explain in 3-4 sentences why these teams were most affected by this physicality adjustment.
-Be specific about what their underlying metrics tell us.
-"""
-
-    response = client.messages.create(
-        model=AGENT_MODEL,
-        max_tokens=500,
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": context}]
-    )
-
-    return response.content[0].text
-
-
 if __name__ == "__main__":
-    # Quick test
+    # Quick test with synthetic data
     test_stats = {
-        "physicality_score": 0.82,
-        "foul_rate_delta": -1.2,
-        "pace_delta": -2.8,
-        "dreb_pct_delta": 0.04
+        "current_record": "51-18",
+        "win_pct": 0.739,
+        "conf_seed": 1,
+        "overall_rank": 1,
+        "net_rating": 10.2,
+        "off_rating": 120.1,
+        "def_rating": 109.9,
+        "vs_top_win_pct": 0.618,
+        "survival_score": 2.14,
+        "projected_wins": 57.0,
+        "proj_range": "53-61",
+        "prob_auto": 0.99,
+        "prob_playin": 0.01,
+        "prob_miss": 0.00,
+        "make_finals_prob": 0.52,
+        "make_conf_finals_prob": 0.71,
+        "top_players": ["SGA: 31.2pts/5.1reb/6.4ast", "Dort: 14.1pts/4.2reb/2.1ast"],
+        "next_games": ["vs DEN (Home) 64% win", "vs LAL (Away) 58% win"],
     }
-    report = get_team_scouting_report(
-        "San Antonio Spurs",
-        test_stats,
-        title_probability=0.08,
-        physicality_weight=1.5
-    )
+    report = get_team_scouting_report("Oklahoma City Thunder", test_stats, title_probability=0.281)
     print(report)

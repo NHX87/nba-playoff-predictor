@@ -50,6 +50,115 @@ def _sigmoid(x: float) -> float:
     return 1.0 / (1.0 + math.exp(-x))
 
 
+def _playin_game_card(
+    seed_a: int,
+    abbr_a: str,
+    score_a: float,
+    record_a: str,
+    seed_b: int,
+    abbr_b: str,
+    score_b: float,
+    record_b: str,
+    outcome_label: str,
+    home_court_team: str,  # abbr of team with home court
+) -> str:
+    """Build a single-line HTML string for one play-in game matchup card."""
+    HOME_COURT = 0.10
+    # Higher seed (lower number) gets home court
+    p_a = _sigmoid((score_a - score_b) + (HOME_COURT if seed_a < seed_b else -HOME_COURT))
+    p_b = 1.0 - p_a
+    color_a = "#059669" if p_a > 0.55 else ("#DC2626" if p_a < 0.45 else "#374151")
+    color_b = "#059669" if p_b > 0.55 else ("#DC2626" if p_b < 0.45 else "#374151")
+    bar_a = int(p_a * 100)
+    bar_b = 100 - bar_a
+    return (
+        '<div style="border:1px solid #E4E7EE;border-radius:8px;padding:0.5rem 0.7rem;margin-bottom:0.5rem;background:#FFFFFF;">'
+        f'<div style="font-size:0.7rem;color:#9CA3AF;font-weight:600;letter-spacing:0.05em;margin-bottom:0.35rem;">{outcome_label}</div>'
+        '<div style="display:flex;align-items:center;gap:0.4rem;">'
+        f'<img src="{logo_url(abbr_a)}" width="22" height="22" style="border-radius:50%;" />'
+        f'<span style="font-weight:700;font-size:0.88rem;width:2.4rem;">#{seed_a} {abbr_a}</span>'
+        f'<span style="color:#6B7280;font-size:0.8rem;width:3.5rem;">{record_a}</span>'
+        f'<span style="font-weight:700;font-size:0.88rem;color:{color_a};margin-left:auto;">{p_a:.0%}</span>'
+        '<span style="color:#9CA3AF;font-size:0.8rem;padding:0 0.3rem;">vs</span>'
+        f'<span style="font-weight:700;font-size:0.88rem;color:{color_b};">{p_b:.0%}</span>'
+        f'<span style="color:#6B7280;font-size:0.8rem;width:3.5rem;text-align:right;">{record_b}</span>'
+        f'<span style="font-weight:700;font-size:0.88rem;width:2.4rem;text-align:right;">#{seed_b} {abbr_b}</span>'
+        f'<img src="{logo_url(abbr_b)}" width="22" height="22" style="border-radius:50%;" />'
+        '</div>'
+        f'<div style="display:flex;gap:0;border-radius:4px;overflow:hidden;margin-top:0.3rem;height:5px;">'
+        f'<div style="width:{bar_a}%;background:{color_a};"></div>'
+        f'<div style="width:{bar_b}%;background:{color_b};"></div>'
+        '</div>'
+        '</div>'
+    )
+
+
+def _render_playin_bracket(
+    conf_name: str,
+    current_preds_df: pd.DataFrame,
+    play_in_df: pd.DataFrame,
+) -> None:
+    """Render the 3-game play-in tournament bracket for one conference."""
+    st.markdown("**Play-In Bracket**")
+    if current_preds_df.empty:
+        st.caption("No standings data.")
+        return
+
+    conf_preds = (
+        current_preds_df[current_preds_df["conference"] == conf_name]
+        .copy()
+        .sort_values("playoff_rank")
+    )
+
+    def _get(rank: int) -> tuple[str, float, str]:
+        row = conf_preds[conf_preds["playoff_rank"] == rank]
+        if row.empty:
+            return ("?", 0.0, "0-0")
+        r = row.iloc[0]
+        abbr = str(r["TEAM_ABBR"])
+        score = float(r["pred_survival_score"]) if not pd.isna(r["pred_survival_score"]) else 0.0
+        record = f"{int(r['wins'])}-{int(r['losses'])}"
+        return (abbr, score, record)
+
+    a7, s7, r7 = _get(7)
+    a8, s8, r8 = _get(8)
+    a9, s9, r9 = _get(9)
+    a10, s10, r10 = _get(10)
+
+    # Simulate probabilities for Game 3 from play-in data
+    pi = play_in_df[play_in_df["conference"] == conf_name] if not play_in_df.empty else pd.DataFrame()
+
+    def _made_prob(abbr: str) -> str:
+        if pi.empty:
+            return ""
+        row = pi[pi["team_abbr"] == abbr]
+        if row.empty:
+            return ""
+        p = float(row.iloc[0]["made_playoffs_prob"])
+        c = "#059669" if p > 0.55 else ("#DC2626" if p < 0.35 else "#92400E")
+        return f'<span style="font-size:0.72rem;color:{c};font-weight:600;">{p:.0%} make playoffs</span>'
+
+    # Game 1: seed 7 vs 8, home court to seed 7
+    st.markdown(
+        _playin_game_card(7, a7, s7, r7, 8, a8, s8, r8, "GAME 1 · Winner → Seed 7 · Loser plays again", a7),
+        unsafe_allow_html=True,
+    )
+    # Game 2: seed 9 vs 10, home court to seed 9
+    st.markdown(
+        _playin_game_card(9, a9, s9, r9, 10, a10, s10, r10, "GAME 2 · Winner advances · Loser eliminated", a9),
+        unsafe_allow_html=True,
+    )
+    # Game 3: likely Seed 8 vs likely Seed 9 (loser G1 vs winner G2)
+    g3_a_abbr, g3_a_score, g3_a_rec = a8, s8, r8  # likely loser of G1
+    g3_b_abbr, g3_b_score, g3_b_rec = a9, s9, r9  # likely winner of G2
+    g3_card = _playin_game_card(8, g3_a_abbr, g3_a_score, g3_a_rec, 9, g3_b_abbr, g3_b_score, g3_b_rec, "GAME 3 · Winner → Seed 8 · Loser eliminated", g3_a_abbr)
+    # Append made-playoffs probability annotation
+    prob_line = _made_prob(g3_a_abbr) + ('&nbsp;&nbsp;' if _made_prob(g3_a_abbr) and _made_prob(g3_b_abbr) else '') + _made_prob(g3_b_abbr)
+    if prob_line.strip():
+        g3_card = g3_card[:-6] + f'<div style="margin-top:0.25rem;display:flex;justify-content:space-between;">{prob_line}</div>' + '</div>'
+    st.markdown(g3_card, unsafe_allow_html=True)
+
+
 def _fmt_dt(ts: pd.Timestamp | None) -> str:
     if ts is None or pd.isna(ts):
         return "n/a"
@@ -116,13 +225,14 @@ def load_base_tables() -> dict[str, pd.DataFrame]:
         """,
         "current_preds": f"""
             SELECT TEAM_ABBR, conference, wins, losses, win_pct, pred_rank_all_30,
-                   playoff_rank, playoff_seed, title_prob_proxy_all_30
+                   playoff_rank, playoff_seed, title_prob_proxy_all_30, pred_survival_score
             FROM current_season_predictions
             WHERE SEASON = '{CURRENT_SEASON_STR}'
             ORDER BY pred_rank_all_30
         """,
         "features": f"""
-            SELECT TEAM_ABBR, rs_net_rating, rs_off_rating, rs_def_rating, rs_vs_top_teams_win_pct
+            SELECT TEAM_ABBR, rs_net_rating, rs_off_rating, rs_def_rating,
+                   rs_vs_top_teams_win_pct, rs_close_game_win_pct, rs_fta, rs_efg_pct
             FROM model_features
             WHERE SEASON = '{CURRENT_SEASON_STR}'
         """,
@@ -978,6 +1088,183 @@ features_df = tables.get("features", pd.DataFrame())
 remaining_games_df = tables.get("remaining_games", pd.DataFrame())
 projected_records_df = tables.get("projected_records", pd.DataFrame())
 
+
+def build_analyst_context() -> str:
+    """Build a rich, LLM-readable context block from all loaded tables."""
+    from config.settings import CURRENT_SEASON_STR as _cs
+    lines: list[str] = [f"=== {_cs} NBA SEASON — MODEL CONTEXT ===\n"]
+
+    # Title odds
+    if not title_df.empty:
+        lines.append("TITLE ODDS (Monte Carlo, 10,000 simulations):")
+        for _, r in title_df.iterrows():
+            seed_str = f"Seed {int(r['playoff_seed'])}" if not pd.isna(r.get("playoff_seed")) else "play-in"
+            lines.append(
+                f"  {r['TEAM_ABBR']} ({r['conference']}, {seed_str}): "
+                f"{float(r['title_prob']):.1%} title | "
+                f"{float(r['make_finals_prob']):.1%} Finals | "
+                f"{float(r['make_conf_finals_prob']):.1%} Conf Finals | "
+                f"{float(r['make_second_round_prob']):.1%} 2nd Round"
+            )
+        lines.append("")
+
+    # Standings + features + projected records merged
+    if not current_preds_df.empty:
+        merged = current_preds_df.copy()
+        if not features_df.empty:
+            merged = merged.merge(features_df, on="TEAM_ABBR", how="left")
+        if not projected_records_df.empty:
+            proj_cols = ["TEAM_ABBR", "expected_final_wins", "p10_final_wins", "p90_final_wins",
+                         "prob_make_top6", "prob_make_playin", "prob_miss_playoffs"]
+            proj_sub = projected_records_df[[c for c in proj_cols if c in projected_records_df.columns]]
+            merged = merged.merge(proj_sub, on="TEAM_ABBR", how="left")
+        merged = merged.sort_values("pred_rank_all_30")
+
+        lines.append("TEAM STANDINGS + MODEL METRICS (sorted by model rank):")
+        for _, r in merged.iterrows():
+            def _f(col, fmt):
+                v = r.get(col)
+                return f"{float(v):{fmt}}" if col in merged.columns and v == v and v is not None else "N/A"
+            nr = _f("rs_net_rating", "+.1f")
+            off = _f("rs_off_rating", ".1f")
+            def_ = _f("rs_def_rating", ".1f")
+            vt = _f("rs_vs_top_teams_win_pct", ".1%")
+            cg = _f("rs_close_game_win_pct", ".1%")
+            fta = _f("rs_fta", ".1f")
+            efg = _f("rs_efg_pct", ".1%")
+            score = _f("pred_survival_score", ".3f")
+            proj = ""
+            if "expected_final_wins" in merged.columns and not pd.isna(r.get("expected_final_wins")):
+                proj = f" | proj {r['expected_final_wins']:.0f}W ({int(r['p10_final_wins'])}–{int(r['p90_final_wins'])})"
+            lines.append(
+                f"  #{int(r['pred_rank_all_30'])}/30 {r['TEAM_ABBR']} "
+                f"({r['conference']} #{int(r['playoff_rank'])}): "
+                f"{int(r['wins'])}-{int(r['losses'])} | "
+                f"Net {nr} Off {off} Def {def_} | "
+                f"vs-top {vt} close-game {cg} FTA {fta} eFG {efg} | "
+                f"model-score {score}{proj}"
+            )
+        lines.append("")
+
+    # Play-in odds
+    if not play_in_df.empty:
+        lines.append("PLAY-IN TOURNAMENT ODDS:")
+        for conf in ["East", "West"]:
+            conf_pi = play_in_df[play_in_df["conference"] == conf].sort_values("made_playoffs_prob", ascending=False)
+            if not conf_pi.empty:
+                parts = [
+                    f"{r['team_abbr']} (S7:{float(r['seed7_prob']):.0%} S8:{float(r['seed8_prob']):.0%} overall:{float(r['made_playoffs_prob']):.0%})"
+                    for _, r in conf_pi.iterrows()
+                ]
+                lines.append(f"  {conf}: {' | '.join(parts)}")
+        lines.append("")
+
+    # Series predictions
+    if not series_df.empty:
+        lines.append("PROJECTED BRACKET:")
+        for _, r in series_df.iterrows():
+            eg = f"{float(r['expected_games']):.1f}g" if not pd.isna(r.get("expected_games")) else ""
+            lines.append(
+                f"  {r['round']} ({r['conference']}): "
+                f"#{r['high_seed']} {r['high_team']} {float(r['high_team_win_prob']):.0%} vs "
+                f"#{r['low_seed']} {r['low_team']} {float(r['low_team_win_prob']):.0%} "
+                f"→ pick: {r['predicted_winner']} {eg}"
+            )
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def build_team_context(team_abbr: str) -> dict:
+    """Build a per-team stats dict for analyst scouting reports."""
+    stats: dict = {}
+
+    if not current_preds_df.empty:
+        row = current_preds_df[current_preds_df["TEAM_ABBR"] == team_abbr]
+        if not row.empty:
+            r = row.iloc[0]
+            stats["current_record"] = f"{int(r['wins'])}-{int(r['losses'])}"
+            stats["win_pct"] = float(r["win_pct"])
+            stats["conf_seed"] = int(r["playoff_rank"])
+            stats["overall_rank"] = int(r["pred_rank_all_30"])
+            if not pd.isna(r.get("pred_survival_score")):
+                stats["survival_score"] = float(r["pred_survival_score"])
+            raw_seed = r.get("playoff_seed")
+            if raw_seed == raw_seed:  # not NaN
+                stats["playoff_seed"] = int(raw_seed)
+
+    if not features_df.empty:
+        row = features_df[features_df["TEAM_ABBR"] == team_abbr]
+        if not row.empty:
+            r = row.iloc[0]
+            stats["net_rating"] = float(r["rs_net_rating"])
+            stats["off_rating"] = float(r["rs_off_rating"])
+            stats["def_rating"] = float(r["rs_def_rating"])
+            stats["vs_top_win_pct"] = float(r["rs_vs_top_teams_win_pct"])
+            if "rs_close_game_win_pct" in features_df.columns and not pd.isna(r.get("rs_close_game_win_pct")):
+                stats["close_game_win_pct"] = float(r["rs_close_game_win_pct"])
+            if "rs_fta" in features_df.columns and not pd.isna(r.get("rs_fta")):
+                stats["fta_per_game"] = float(r["rs_fta"])
+            if "rs_efg_pct" in features_df.columns and not pd.isna(r.get("rs_efg_pct")):
+                stats["efg_pct"] = float(r["rs_efg_pct"])
+
+    if not projected_records_df.empty:
+        row = projected_records_df[projected_records_df["TEAM_ABBR"] == team_abbr]
+        if not row.empty:
+            r = row.iloc[0]
+            stats["projected_wins"] = float(r["expected_final_wins"])
+            stats["proj_range"] = f"{int(r['p10_final_wins'])}–{int(r['p90_final_wins'])}"
+            stats["prob_auto"] = float(r["prob_make_top6"])
+            stats["prob_playin"] = float(r["prob_make_playin"])
+            stats["prob_miss"] = float(r["prob_miss_playoffs"])
+
+    if not title_df.empty:
+        row = title_df[title_df["TEAM_ABBR"] == team_abbr]
+        if not row.empty:
+            r = row.iloc[0]
+            stats["title_prob"] = float(r["title_prob"])
+            stats["make_finals_prob"] = float(r["make_finals_prob"])
+            stats["make_conf_finals_prob"] = float(r["make_conf_finals_prob"])
+            stats["make_second_round_prob"] = float(r["make_second_round_prob"])
+
+    if not play_in_df.empty:
+        row = play_in_df[play_in_df["team_abbr"] == team_abbr]
+        if not row.empty:
+            r = row.iloc[0]
+            stats["seed7_prob"] = float(r["seed7_prob"])
+            stats["seed8_prob"] = float(r["seed8_prob"])
+            stats["made_playoffs_prob"] = float(r["made_playoffs_prob"])
+
+    if not player_rs_df.empty:
+        team_players = player_rs_df[player_rs_df["TEAM_ABBR"] == team_abbr]
+        if not team_players.empty:
+            recent = team_players.sort_values("GAME_DATE").groupby("PLAYER_NAME").tail(10)
+            avg_stats = (
+                recent.groupby("PLAYER_NAME")
+                .agg(ppg=("PTS", "mean"), rpg=("REB", "mean"), apg=("AST", "mean"), gp=("PTS", "count"))
+                .reset_index()
+            )
+            avg_stats = avg_stats[avg_stats["gp"] >= 5].sort_values("ppg", ascending=False).head(5)
+            stats["top_players"] = [
+                f"{r['PLAYER_NAME']}: {r['ppg']:.1f}pts/{r['rpg']:.1f}reb/{r['apg']:.1f}ast"
+                for _, r in avg_stats.iterrows()
+            ]
+
+    if not remaining_games_df.empty:
+        team_sched = (
+            remaining_games_df[remaining_games_df["TEAM_ABBR"] == team_abbr]
+            .sort_values("GAME_DATE")
+            .head(5)
+        )
+        if not team_sched.empty:
+            stats["next_games"] = [
+                f"vs {r['OPP_ABBR']} ({'Home' if r['IS_HOME'] else 'Away'}) {float(r['GAME_WIN_PROB']):.0%} win"
+                for _, r in team_sched.iterrows()
+            ]
+
+    return stats
+
+
 st.markdown(
     f"""
     <div class='hero'>
@@ -1036,29 +1323,21 @@ with st.sidebar:
                 )
 
 playin_tab, playoff_tab, team_tab, analyst_tab = st.tabs(
-    ["Play-In Predictor / Race", "Playoff Predictor", "Team-by-Team Breakdown", "🤖 AI Analyst"]
+    ["① Standings & Play-In", "② Playoff Predictor", "③ Team Breakdown", "④ 🤖 AI Analyst"]
 )
 
 with playin_tab:
-    st.markdown("<div class='section-label'>Play-In Race & Standings Bubble</div>", unsafe_allow_html=True)
+    st.markdown("<div class='section-label'>Projected Final Standings → Play-In</div>", unsafe_allow_html=True)
     render_meta_chips(
         [
-            ("Metric", "Make playoffs probability"),
-            ("Source", "app_play_in_current + current_season_predictions"),
-            ("Interpretation", "Seeds 5-12 bubble context + play-in odds"),
+            ("Metric", "Monte Carlo projected final record + make-playoffs probability"),
+            ("Source", "team_projected_record + app_play_in_current + current_season_predictions"),
+            ("Interpretation", "Full 15-team projected standings feed into the play-in bracket"),
         ]
     )
     if play_in_df.empty:
         st.info("`app_play_in_current` is missing. Run simulation pipeline first.")
     else:
-        p = play_in_df.copy()
-        p["projected_seed"] = p.apply(
-            lambda r: 7 if float(r["seed7_prob"]) >= float(r["seed8_prob"]) else 8,
-            axis=1,
-        )
-        # Build a lookup of play-in probs by team
-        playin_lookup = {row.team_abbr: row for row in p.itertuples(index=False)}
-
         # Hot streak: last 10 W-L per team from regular_season
         def _hot_streak(team: str) -> str:
             if rs_df.empty:
@@ -1077,148 +1356,99 @@ with playin_tab:
             with mount:
                 st.markdown(f"### {conf_name}")
 
-                # ── Standings bubble (seeds 5-12) ──────────────────────────
+                # ── Projected Final Standings (all 15 teams) ──────────────────────────
                 if not current_preds_df.empty:
                     conf_preds = (
                         current_preds_df[current_preds_df["conference"] == conf_name]
                         .copy()
                         .sort_values("playoff_rank")
                     )
-                    # seeds 5-12 by conference standing rank
-                    bubble = conf_preds[
-                        (conf_preds["playoff_rank"] >= 5) & (conf_preds["playoff_rank"] <= 12)
-                    ].copy()
 
-                    if not bubble.empty:
-                        # Max wins for GB calculation
-                        max_wins = int(bubble.iloc[0]["wins"])
-                        bubble["gb"] = (max_wins - bubble["wins"]) / 1.0
+                    # Build projected-record lookup for this conference
+                    proj_lookup: dict = {}
+                    if not projected_records_df.empty:
+                        conf_proj = projected_records_df[
+                            projected_records_df["CONFERENCE"] == conf_name
+                        ]
+                        for _, pr in conf_proj.iterrows():
+                            proj_lookup[pr["TEAM_ABBR"]] = pr
 
-                        # Build projected-record lookup for this conference
-                        proj_lookup: dict = {}
-                        if not projected_records_df.empty:
-                            conf_proj = projected_records_df[
-                                projected_records_df["CONFERENCE"] == conf_name
-                            ]
-                            for _, pr in conf_proj.iterrows():
-                                proj_lookup[pr["TEAM_ABBR"]] = pr
-
-                        st.markdown("**Bubble Standings (Seeds 5–12)**")
-                        rows_html = ""
-                        for br in bubble.itertuples(index=False):
-                            seed = int(br.playoff_rank)
-                            abbr = br.TEAM_ABBR
-                            record = f"{int(br.wins)}-{int(br.losses)}"
-                            gb = float(br.gb)
-                            gb_str = "—" if gb == 0 else f"{gb:.1f}"
-
-                            # Projected final record from Monte Carlo
-                            proj = proj_lookup.get(abbr)
-                            proj_str = ""
-                            seed_risk_badge = ""
-                            if proj is not None:
-                                ef_w = proj["expected_final_wins"]
-                                p10_w = proj["p10_final_wins"]
-                                p90_w = proj["p90_final_wins"]
-                                proj_str = f'<span style="color:#6B7280;font-size:0.78rem;margin-left:0.3rem;">proj {ef_w:.0f}W ({p10_w}–{p90_w})</span>'
-                                # Seed-specific risk/opportunity badge
-                                if seed == 6:
-                                    fall_p = proj["prob_make_playin"]
-                                    if fall_p > 0.15:
-                                        seed_risk_badge = f'<span style="background:#FEF3C7;color:#92400E;border-radius:4px;padding:1px 5px;font-size:0.72rem;">FALL RISK {fall_p:.0%}</span>'
-                                elif seed == 11:
-                                    climb_p = proj["prob_make_playin"]
-                                    if climb_p > 0.10:
-                                        seed_risk_badge = f'<span style="background:#D1FAE5;color:#065F46;border-radius:4px;padding:1px 5px;font-size:0.72rem;">CLIMB {climb_p:.0%}</span>'
-
-                            # Zone badge
-                            if seed <= 6:
-                                zone = '<span style="background:#D1FAE5;color:#065F46;border-radius:4px;padding:1px 6px;font-size:0.75rem;font-weight:700;">AUTO</span>'
-                                # flag if gap to seed 7 is small
-                                seed7_wins = bubble[bubble["playoff_rank"] == 7]["wins"].values
-                                if len(seed7_wins) and (int(br.wins) - int(seed7_wins[0])) <= 2:
-                                    zone += ' <span style="background:#FEF3C7;color:#92400E;border-radius:4px;padding:1px 5px;font-size:0.72rem;">WATCH</span>'
-                            elif seed <= 10:
-                                zone = '<span style="background:#DBEAFE;color:#1E40AF;border-radius:4px;padding:1px 6px;font-size:0.75rem;font-weight:700;">PLAY-IN</span>'
-                                if proj is not None:
-                                    zone += f' <span style="color:#6B7280;font-size:0.78rem;">{proj["prob_make_playin"]:.0%} in</span>'
-                            else:
-                                zone = '<span style="background:#F3F4F6;color:#6B7280;border-radius:4px;padding:1px 6px;font-size:0.75rem;font-weight:700;">OUT</span>'
-
-                            hot = _hot_streak(abbr)
-                            rows_html += (
-                                '<div style="display:flex;align-items:center;gap:0.5rem;padding:0.3rem 0;border-bottom:1px solid #F3F4F6;flex-wrap:wrap;">'
-                                f'<span style="color:#9CA3AF;font-size:0.8rem;width:1.4rem;text-align:right;">{seed}</span>'
-                                f'<img src="{logo_url(abbr)}" width="20" height="20" style="border-radius:50%;" />'
-                                f'<span style="font-weight:700;font-size:0.9rem;width:2.5rem;">{abbr}</span>'
-                                f'<span style="color:#374151;font-size:0.85rem;width:4rem;">{record}</span>'
-                                f'{proj_str}'
-                                f'<span style="color:#9CA3AF;font-size:0.8rem;width:3rem;">{gb_str} GB</span>'
-                                f'{zone}'
-                                f'{seed_risk_badge}'
-                                f'<span style="margin-left:auto;">{hot}</span>'
-                                '</div>'
-                            )
-                        st.markdown(
-                            f'<div style="background:#FAFAFA;border:1px solid #E4E7EE;border-radius:8px;padding:0.5rem 0.75rem;margin-bottom:1rem;">{rows_html}</div>',
-                            unsafe_allow_html=True,
+                    # Sort by projected wins if Monte Carlo data available, else current rank
+                    if proj_lookup:
+                        conf_preds["_proj_wins"] = conf_preds["TEAM_ABBR"].map(
+                            lambda a: proj_lookup[a]["expected_final_wins"] if a in proj_lookup else float(conf_preds[conf_preds["TEAM_ABBR"] == a]["wins"].iloc[0])
                         )
+                        conf_preds = conf_preds.sort_values("_proj_wins", ascending=False).reset_index(drop=True)
+                    conf_preds["proj_rank"] = range(1, len(conf_preds) + 1)
 
-                # ── Play-in cards (seeds 7-10) ──────────────────────────
-                st.markdown("**Play-In Teams**")
-                conf_playin = p[p["conference"] == conf_name].sort_values(
-                    "made_playoffs_prob", ascending=False
-                )
-                if conf_playin.empty:
-                    st.caption("No teams found.")
-                    continue
+                    st.markdown("**Projected Final Standings**")
+                    rows_html = ""
+                    for _, br in conf_preds.iterrows():
+                        proj_rank = int(br["proj_rank"])
+                        abbr = str(br["TEAM_ABBR"])
+                        record = f"{int(br['wins'])}-{int(br['losses'])}"
 
-                for row in conf_playin.itertuples(index=False):
-                    hot = _hot_streak(row.team_abbr)
-                    # Seed from current_preds if available
-                    seed_num = ""
-                    if not current_preds_df.empty:
-                        match = current_preds_df[current_preds_df["TEAM_ABBR"] == row.team_abbr]
-                        if not match.empty:
-                            raw_seed = match.iloc[0]['playoff_seed']
-                            if raw_seed == raw_seed:  # not NaN
-                                seed_num = f"#{int(raw_seed)} · "
+                        # Zone dividers
+                        if proj_rank == 7:
+                            rows_html += '<div style="text-align:center;color:#1E40AF;background:#EFF6FF;font-size:0.68rem;font-weight:600;padding:0.18rem 0;margin:0.15rem 0;border-radius:4px;letter-spacing:0.06em;">── PLAY-IN LINE ──</div>'
+                        elif proj_rank == 11:
+                            rows_html += '<div style="text-align:center;color:#9CA3AF;background:#F9FAFB;font-size:0.68rem;font-weight:600;padding:0.18rem 0;margin:0.15rem 0;border-radius:4px;letter-spacing:0.06em;">── ELIMINATED ──</div>'
+
+                        # Projected record from Monte Carlo
+                        proj = proj_lookup.get(abbr)
+                        proj_str = ""
+                        prob_badge = ""
+                        if proj is not None:
+                            ef_w = proj["expected_final_wins"]
+                            p10_w = proj["p10_final_wins"]
+                            p90_w = proj["p90_final_wins"]
+                            proj_str = (
+                                f'<span style="color:#374151;font-size:0.8rem;font-weight:600;">→ {ef_w:.0f}W</span>'
+                                f'<span style="color:#9CA3AF;font-size:0.74rem;"> ({p10_w}–{p90_w})</span>'
+                            )
+                            if proj_rank <= 6:
+                                p_auto = float(proj["prob_make_top6"])
+                                if p_auto < 0.85:
+                                    prob_badge = f'<span style="background:#FEF3C7;color:#92400E;border-radius:4px;padding:1px 5px;font-size:0.68rem;font-weight:600;">{p_auto:.0%} lock</span>'
+                            elif proj_rank <= 10:
+                                p_in = float(proj["prob_make_playin"])
+                                prob_badge = f'<span style="background:#EFF6FF;color:#1E40AF;border-radius:4px;padding:1px 5px;font-size:0.68rem;font-weight:600;">{p_in:.0%} in</span>'
+                            else:
+                                p_climb = float(proj["prob_make_playin"])
+                                if p_climb > 0.05:
+                                    prob_badge = f'<span style="background:#F3F4F6;color:#6B7280;border-radius:4px;padding:1px 5px;font-size:0.68rem;">{p_climb:.0%} climb</span>'
+
+                        # Zone badge
+                        if proj_rank <= 6:
+                            zone = '<span style="background:#D1FAE5;color:#065F46;border-radius:4px;padding:1px 5px;font-size:0.68rem;font-weight:700;">AUTO</span>'
+                        elif proj_rank <= 10:
+                            zone = '<span style="background:#DBEAFE;color:#1E40AF;border-radius:4px;padding:1px 5px;font-size:0.68rem;font-weight:700;">PLAY-IN</span>'
+                        else:
+                            zone = '<span style="background:#F3F4F6;color:#9CA3AF;border-radius:4px;padding:1px 5px;font-size:0.68rem;font-weight:700;">OUT</span>'
+
+                        hot = _hot_streak(abbr)
+                        rows_html += (
+                            '<div style="display:flex;align-items:center;gap:0.35rem;padding:0.22rem 0;border-bottom:1px solid #F3F4F6;flex-wrap:wrap;">'
+                            f'<span style="color:#9CA3AF;font-size:0.75rem;width:1.2rem;text-align:right;">{proj_rank}</span>'
+                            f'<img src="{logo_url(abbr)}" width="18" height="18" style="border-radius:50%;" />'
+                            f'<span style="font-weight:700;font-size:0.85rem;width:2.4rem;">{abbr}</span>'
+                            f'<span style="color:#6B7280;font-size:0.78rem;width:3.4rem;">{record}</span>'
+                            f'<span style="flex:1;">{proj_str}</span>'
+                            f'{zone}'
+                            f'{prob_badge}'
+                            f'<span style="margin-left:auto;">{hot}</span>'
+                            '</div>'
+                        )
                     st.markdown(
-                        f"""
-                        <div style="
-                            border:1px solid #E4E7EE;
-                            background:#FFFFFF;
-                            border-radius:8px;
-                            padding:0.55rem 0.7rem;
-                            margin-bottom:0.5rem;
-                            display:flex;
-                            align-items:center;
-                            justify-content:space-between;
-                            gap:0.6rem;
-                            box-shadow:0 1px 3px rgba(0,0,0,0.05);">
-                            <div style="display:flex;align-items:center;gap:0.55rem;">
-                                <img src="{logo_url(row.team_abbr)}" width="30" height="30" style="border-radius:50%;" />
-                                <div>
-                                    <div style="font-weight:700;color:#111827;">{seed_num}{row.team_abbr}</div>
-                                    <div style="font-size:0.78rem;margin-top:2px;">{hot}</div>
-                                </div>
-                            </div>
-                            <div style="text-align:center;">
-                                <div style="color:#6B7280;font-size:0.75rem;">Seed 7</div>
-                                <div style="font-weight:700;color:#111827;">{float(row.seed7_prob):.1%}</div>
-                            </div>
-                            <div style="text-align:center;">
-                                <div style="color:#6B7280;font-size:0.75rem;">Seed 8</div>
-                                <div style="font-weight:700;color:#111827;">{float(row.seed8_prob):.1%}</div>
-                            </div>
-                            <div style="text-align:center;">
-                                <div style="color:#6B7280;font-size:0.75rem;">Make Playoffs</div>
-                                <div style="font-weight:700;color:#059669;">{float(row.made_playoffs_prob):.1%}</div>
-                            </div>
-                        </div>
-                        """,
+                        f'<div style="background:#FAFAFA;border:1px solid #E4E7EE;border-radius:8px;padding:0.5rem 0.75rem;margin-bottom:0.75rem;">{rows_html}</div>',
                         unsafe_allow_html=True,
                     )
+
+                # ── Play-in bracket (seeds 7-10) ──────────────────────────
+                st.caption("Seeds 7–10 above enter the play-in. Winners claim Seed 7 and Seed 8.")
+                _render_playin_bracket(conf_name, current_preds_df, play_in_df)
+
+        st.caption("Play-in winners join Seeds 1–6 in the full 16-team field → see the ② Playoff Predictor tab.")
 
 with playoff_tab:
     st.markdown("<div class='section-label'>Projected Playoff Bracket</div>", unsafe_allow_html=True)
@@ -1368,6 +1598,80 @@ with team_tab:
             rcf.metric("Conf Finals", pct(float(tr.get("make_conf_finals_prob", 0) or 0)))
             rf.metric("Finals", pct(float(tr.get("make_finals_prob", 0) or 0)))
             rt.metric("Title", pct(float(tr.get("title_prob", 0) or 0)))
+
+        # ── Model Signal Breakdown ──────────────────────────────────────────
+        if not features_df.empty:
+            team_feat = features_df[features_df["TEAM_ABBR"] == team_abbr]
+            if not team_feat.empty:
+                tf = team_feat.iloc[0]
+                st.markdown("<div class='section-label'>Model Signal Breakdown</div>", unsafe_allow_html=True)
+                render_meta_chips([
+                    ("Source", "model_features (5 FINAL_FEATURES)"),
+                    ("Model", "CoxPH survival — rounds_reached target"),
+                    ("Percentile", "vs all 30 teams this season"),
+                ])
+
+                def _pct_rank(col: str) -> int:
+                    """League percentile for this team on col (higher = better)."""
+                    if col not in features_df.columns:
+                        return 50
+                    vals = features_df[col].dropna()
+                    if vals.empty:
+                        return 50
+                    return int((vals <= float(tf[col])).mean() * 100)
+
+                def _bar(pct: int, color: str) -> str:
+                    empty = "#E4E7EE"
+                    return (
+                        f'<div style="background:{empty};border-radius:3px;height:6px;width:100%;margin-top:3px;">'
+                        f'<div style="background:{color};border-radius:3px;height:6px;width:{pct}%;"></div>'
+                        '</div>'
+                    )
+
+                FEATURES_META = [
+                    ("rs_net_rating",           "Net Rating",          "+.1f", "pts/100 possessions (overall team quality)"),
+                    ("rs_vs_top_teams_win_pct", "vs Top Teams Win%",   ".1%",  "win% against ≥.600 teams this season"),
+                    ("rs_close_game_win_pct",   "Close Game Win%",     ".1%",  "win% in games decided by ≤5 pts (clutch)"),
+                    ("rs_efg_pct",              "eFG%",                ".1%",  "shot-quality-adjusted field goal efficiency"),
+                    ("rs_fta",                  "Free Throw Att/g",    ".1f",  "physical pressure / foul-drawing volume"),
+                ]
+
+                feat_cols = st.columns(len(FEATURES_META))
+                for col_ui, (feat, label, fmt, desc) in zip(feat_cols, FEATURES_META):
+                    with col_ui:
+                        val = tf.get(feat)
+                        if val is None or (hasattr(val, '__class__') and val != val):
+                            col_ui.caption(label)
+                            col_ui.markdown("—")
+                            continue
+                        val = float(val)
+                        pct_r = _pct_rank(feat)
+                        bar_color = "#059669" if pct_r >= 67 else ("#F59E0B" if pct_r >= 33 else "#DC2626")
+                        formatted = f"{val:{fmt}}"
+                        st.markdown(
+                            f'<div style="border:1px solid #E4E7EE;border-radius:8px;padding:0.5rem 0.6rem;background:#FAFAFA;">'
+                            f'<div style="font-size:0.72rem;color:#9CA3AF;font-weight:600;">{label}</div>'
+                            f'<div style="font-size:1.05rem;font-weight:700;color:#111827;">{formatted}</div>'
+                            f'<div style="font-size:0.68rem;color:{bar_color};font-weight:600;">{pct_r}th pct</div>'
+                            f'{_bar(pct_r, bar_color)}'
+                            f'<div style="font-size:0.65rem;color:#9CA3AF;margin-top:3px;">{desc}</div>'
+                            '</div>',
+                            unsafe_allow_html=True,
+                        )
+
+                # Survival score summary
+                team_pred = current_preds_df[current_preds_df["TEAM_ABBR"] == team_abbr]
+                if not team_pred.empty:
+                    score = team_pred.iloc[0].get("pred_survival_score")
+                    rank_30 = team_pred.iloc[0].get("pred_rank_all_30")
+                    if score == score and score is not None:  # not NaN
+                        score_pct = _pct_rank("rs_net_rating")  # proxy; survival score not in features_df
+                        all_scores = current_preds_df["pred_survival_score"].dropna().sort_values(ascending=False)
+                        score_rank = int((all_scores > float(score)).sum()) + 1
+                        st.caption(
+                            f"**Model Score: {float(score):.3f}** — ranked #{score_rank}/30 by CoxPH survival output "
+                            f"(higher = model projects deeper playoff run)"
+                        )
 
         c1, c2 = st.columns([1.45, 1.0])
         with c1:
@@ -1525,20 +1829,12 @@ with analyst_tab:
             if "analyst_history" not in st.session_state:
                 st.session_state.analyst_history = []
 
-            # Build model context from loaded tables
-            _top3 = []
-            if not title_df.empty:
-                _top3 = (
-                    title_df.head(3)
-                    .apply(lambda r: f"{r['TEAM_ABBR']} ({float(r['title_prob']):.1%})", axis=1)
-                    .tolist()
-                )
+            # Build full model context from all loaded tables (cached per session)
+            if "analyst_full_context" not in st.session_state:
+                st.session_state.analyst_full_context = build_analyst_context()
             _model_context = {
-                "physicality_weight": 1.0,
-                "top_3": ", ".join(_top3) if _top3 else "N/A",
-                "most_physical": "N/A",
-                "pace_teams": "N/A",
                 "season": _cur_season,
+                "full_context": st.session_state.analyst_full_context,
             }
 
             st.markdown(
@@ -1546,26 +1842,28 @@ with analyst_tab:
                 unsafe_allow_html=True,
             )
 
-            # Quick scouting report
-            if not title_df.empty:
+            # Quick scouting report — any of the 30 teams
+            _all_teams = sorted(current_preds_df["TEAM_ABBR"].tolist()) if not current_preds_df.empty else (title_df["TEAM_ABBR"].tolist() if not title_df.empty else [])
+            if _all_teams:
                 _col1, _col2 = st.columns([2, 1])
                 with _col1:
                     _scout_team = st.selectbox(
                         "Quick scouting report",
-                        title_df["TEAM_ABBR"].tolist(),
+                        _all_teams,
                         key="analyst_scout_team",
                         label_visibility="collapsed",
                     )
                 with _col2:
                     if st.button("Generate report", key="analyst_report_btn", use_container_width=True):
-                        _row = title_df[title_df["TEAM_ABBR"] == _scout_team].iloc[0]
+                        _team_stats = build_team_context(_scout_team)
+                        _title_prob = _team_stats.get("title_prob", 0.0)
                         _prompt_text = f"Give me a playoff scouting report for {_scout_team}."
                         with st.spinner("Generating scouting report…"):
                             try:
                                 _report = get_team_scouting_report(
                                     _scout_team,
-                                    {},
-                                    float(_row["title_prob"]),
+                                    _team_stats,
+                                    _title_prob,
                                 )
                                 st.session_state.analyst_messages.append(
                                     {"role": "user", "content": _prompt_text}
