@@ -76,17 +76,21 @@ def load_to_duckdb() -> None:
     con.execute("CREATE TABLE teams AS SELECT * FROM teams_df")
     print(f"Loaded {len(teams_df)} teams into teams")
 
+    con.execute("DROP VIEW IF EXISTS regular_season")
+    con.execute("DROP TABLE IF EXISTS regular_season")
     con.execute(
         """
-        CREATE OR REPLACE VIEW regular_season AS
+        CREATE VIEW regular_season AS
         SELECT * FROM raw_game_logs
         WHERE SEASON_TYPE = 'Regular Season'
         """
     )
 
+    con.execute("DROP VIEW IF EXISTS playoffs")
+    con.execute("DROP TABLE IF EXISTS playoffs")
     con.execute(
         """
-        CREATE OR REPLACE VIEW playoffs AS
+        CREATE VIEW playoffs AS
         SELECT * FROM raw_game_logs
         WHERE SEASON_TYPE = 'Playoffs'
         """
