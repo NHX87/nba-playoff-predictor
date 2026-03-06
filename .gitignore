@@ -4,9 +4,7 @@
 venv/
 .streamlit/secrets.toml
 
-# Raw data — historical parquets are committed (never change, CI uses them directly)
-# Only exclude current season (refreshed nightly) and any temp files
-data/raw/*2025-26*.parquet
+# Raw data — all parquets committed to git; refresh 2025-26 locally when API is available
 data/processed/*.duckdb
 # Allow slim app DB for Streamlit Cloud deployment
 !data/processed/nba_app.duckdb

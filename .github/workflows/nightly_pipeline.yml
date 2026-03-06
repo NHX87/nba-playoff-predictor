@@ -24,9 +24,6 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
 
-      - name: Bust current season cache
-        run: rm -f data/raw/*2025-26*.parquet
-
       - name: Install dependencies
         run: pip install -r requirements.txt huggingface_hub
 
@@ -36,6 +33,7 @@ jobs:
           DB_PATH: data/processed/nba_app.duckdb
         run: |
           python -m pipeline.run_pipeline \
+            --skip-fetch \
             --with-model \
             --with-current-projections \
             --with-sanity-report
