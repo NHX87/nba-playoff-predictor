@@ -76,25 +76,17 @@ def load_to_duckdb() -> None:
     con.execute("CREATE TABLE teams AS SELECT * FROM teams_df")
     print(f"Loaded {len(teams_df)} teams into teams")
 
-    con.execute("DROP VIEW IF EXISTS regular_season")
-    con.execute("DROP TABLE IF EXISTS regular_season")
-    con.execute(
-        """
-        CREATE VIEW regular_season AS
-        SELECT * FROM raw_game_logs
-        WHERE SEASON_TYPE = 'Regular Season'
-        """
-    )
-
-    con.execute("DROP VIEW IF EXISTS playoffs")
-    con.execute("DROP TABLE IF EXISTS playoffs")
-    con.execute(
-        """
-        CREATE VIEW playoffs AS
-        SELECT * FROM raw_game_logs
-        WHERE SEASON_TYPE = 'Playoffs'
-        """
-    )
+    for name, condition in [
+        ("regular_season", "SEASON_TYPE = 'Regular Season'"),
+        ("playoffs",       "SEASON_TYPE = 'Playoffs'"),
+    ]:
+        row = con.execute(
+            "SELECT table_type FROM information_schema.tables WHERE table_name = ?", [name]
+        ).fetchone()
+        if row:
+            obj_type = "VIEW" if row[0] == "VIEW" else "TABLE"
+            con.execute(f"DROP {obj_type} IF EXISTS {name}")
+        con.execute(f"CREATE VIEW {name} AS SELECT * FROM raw_game_logs WHERE {condition}")
 
     print("Created/updated views: regular_season, playoffs")
     con.close()
