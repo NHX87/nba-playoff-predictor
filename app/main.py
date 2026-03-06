@@ -1168,6 +1168,74 @@ remaining_games_df = tables.get("remaining_games", pd.DataFrame())
 projected_records_df = tables.get("projected_records", pd.DataFrame())
 daily_model_scores_df = tables.get("daily_model_scores", pd.DataFrame())
 
+# ── Preseason Vegas odds (BBRef, vig-removed) — used for badge logic in Tab 1 ──
+_PRESEASON_PROBS: dict[str, float] = {
+    "OKC": 0.2433, "DEN": 0.1272, "CLE": 0.0973, "NYK": 0.0827,
+    "MIN": 0.0591, "HOU": 0.0551, "LAL": 0.0487, "LAC": 0.0435,
+    "ORL": 0.0435, "GSW": 0.0318, "DET": 0.0243, "DAL": 0.0230,
+    "PHI": 0.0202, "ATL": 0.0202, "MIL": 0.0148, "BOS": 0.0136,
+    "SAS": 0.0123, "IND": 0.0082, "TOR": 0.0082, "MEM": 0.0066,
+    "MIA": 0.0041, "NOP": 0.0027, "PHX": 0.0017, "POR": 0.0017,
+    "SAC": 0.0017, "CHI": 0.0017, "CHA": 0.0008, "BKN": 0.0008,
+    "UTA": 0.0008, "WAS": 0.0008,
+}
+
+
+def team_full_name(abbr: str, city_only: bool = False) -> str:
+    """'BOS' → 'Boston Celtics' (or 'Boston' if city_only=True)."""
+    if teams_df.empty:
+        return abbr
+    row = teams_df[teams_df["TEAM_ABBR"] == abbr]
+    if row.empty:
+        return abbr
+    city = str(row.iloc[0].get("city", abbr))
+    name = str(row.iloc[0].get("TEAM_NAME", abbr))
+    return city if city_only else f"{city} {name}"
+
+
+def build_hero_narrative(title_df: pd.DataFrame) -> str:
+    """Generate a plain-English championship summary paragraph."""
+    if title_df.empty:
+        return "Run the simulation pipeline to generate championship predictions."
+    sorted_df = title_df.sort_values("title_prob", ascending=False)
+    leader = sorted_df.iloc[0]
+    leader_name = team_full_name(str(leader["TEAM_ABBR"]))
+    leader_pct = float(leader["title_prob"])
+    n_sims = 10_000
+
+    surprises = []
+    for _, row in sorted_df.iterrows():
+        abbr = str(row["TEAM_ABBR"])
+        current = float(row["title_prob"])
+        preseason = _PRESEASON_PROBS.get(abbr, 1 / 30)
+        if current > preseason * 2.5 and current > 0.05:
+            surprises.append(team_full_name(abbr))
+
+    lead_sentence = (
+        f"The model simulated the 2025–26 NBA playoffs {n_sims:,} times. "
+        f"**{leader_name} are the strongest favorite ({leader_pct:.0%})** — "
+        f"they win the championship roughly 1 in {round(1/leader_pct):.0f} times the bracket plays out."
+    )
+    if surprises:
+        surprise_str = " and ".join(surprises[:2])
+        lead_sentence += (
+            f" {surprise_str} are the biggest surprises, "
+            f"both far exceeding their preseason expectations."
+        )
+    return lead_sentence
+
+
+def _title_badge(abbr: str, prob: float, rank: int) -> str:
+    """Return plain-English badge for a team's title outlook."""
+    if rank == 1:
+        return "★ Favorite"
+    preseason = _PRESEASON_PROBS.get(abbr, 1 / 30)
+    if prob > preseason * 2.5 and prob > 0.05:
+        return "↑ Surprise"
+    if prob >= 0.05:
+        return "→ Contender"
+    return "⚠ Longshot"
+
 
 def build_analyst_context() -> str:
     """Build a rich, LLM-readable context block from all loaded tables."""
@@ -1402,11 +1470,277 @@ with st.sidebar:
                     unsafe_allow_html=True,
                 )
 
-playin_tab, playoff_tab, team_tab, analyst_tab = st.tabs(
-    ["① Standings & Play-In", "② Playoff Predictor", "③ Team Breakdown", "④ 🤖 AI Analyst"]
+tab_who, tab_ask, tab_bracket, tab_details = st.tabs(
+    ["🏆 Who Wins?", "🤖 Ask the AI", "📊 The Bracket", "🔍 Details"]
 )
 
-with playin_tab:
+# ── Tab 1: Who Wins? ────────────────────────────────────────────────────────
+with tab_who:
+    # Plain-English hero narrative
+    narrative = build_hero_narrative(title_df)
+    st.markdown(
+        f'<div style="background:rgba(255,255,255,0.82);border:1px solid #d6deea;border-radius:14px;'
+        f'padding:1rem 1.2rem;margin-bottom:1.2rem;font-size:1.05rem;line-height:1.6;">'
+        f'{narrative}</div>',
+        unsafe_allow_html=True,
+    )
+
+    # Championship odds leaderboard
+    st.markdown("<div class='section-label'>Championship Odds — All Playoff Contenders</div>", unsafe_allow_html=True)
+    st.caption("Based on 10,000 simulated playoff brackets. Hover over team names to see their city.")
+
+    if title_df.empty:
+        st.info("Run the simulation pipeline to generate championship odds.")
+    else:
+        sorted_title = title_df.sort_values("title_prob", ascending=False).reset_index(drop=True)
+        max_prob = float(sorted_title["title_prob"].iloc[0])
+
+        for rank, row in sorted_title.iterrows():
+            abbr = str(row["TEAM_ABBR"])
+            prob = float(row["title_prob"])
+            full_name = team_full_name(abbr)
+            badge = _title_badge(abbr, prob, rank + 1)
+            bar_pct = int(prob / max_prob * 100)
+
+            badge_color = {"★ Favorite": "#059669", "↑ Surprise": "#2563EB", "→ Contender": "#6B7280", "⚠ Longshot": "#9CA3AF"}.get(badge, "#9CA3AF")
+            bar_color = {"★ Favorite": "#059669", "↑ Surprise": "#2563EB", "→ Contender": "#0f4fd8", "⚠ Longshot": "#d1d5db"}.get(badge, "#0f4fd8")
+
+            st.markdown(
+                f'<div style="display:flex;align-items:center;gap:0.75rem;padding:0.55rem 0.75rem;'
+                f'border:1px solid #e5e7eb;border-radius:10px;margin-bottom:0.4rem;background:rgba(255,255,255,0.8);">'
+                f'<img src="{logo_url(abbr)}" width="32" height="32" style="border-radius:50%;flex-shrink:0;" />'
+                f'<div style="flex:1;min-width:0;">'
+                f'  <div style="font-weight:700;font-size:0.97rem;">{full_name}</div>'
+                f'  <div style="background:#e5e7eb;border-radius:4px;height:6px;margin-top:4px;">'
+                f'    <div style="background:{bar_color};border-radius:4px;height:6px;width:{bar_pct}%;"></div>'
+                f'  </div>'
+                f'</div>'
+                f'<div style="text-align:right;flex-shrink:0;">'
+                f'  <div style="font-weight:700;font-size:1.1rem;">{prob:.0%}</div>'
+                f'  <div style="font-size:0.72rem;color:{badge_color};font-weight:600;">{badge}</div>'
+                f'</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    with st.expander("🔬 Show model details & methodology"):
+        st.caption(
+            "**How this works:** The model runs a Cox Proportional Hazards survival model trained on 15 seasons "
+            "of NBA playoff data (2010–2024). It learns which regular-season metrics predict how far a team goes. "
+            "Those scores feed a Logistic Regression that predicts each individual series, then a Monte Carlo "
+            "simulation plays out the full bracket 10,000 times to generate these championship probabilities."
+        )
+        st.caption("**Key metrics:** Net rating, eFG%, close-game win%, vs-top-teams win%, free throw rate.")
+        if not title_df.empty:
+            st.dataframe(
+                title_df.sort_values("title_prob", ascending=False)
+                .assign(title_pct=lambda d: (d["title_prob"] * 100).round(1))
+                [["TEAM_ABBR", "title_pct"]]
+                .rename(columns={"TEAM_ABBR": "Team", "title_pct": "Title Odds (%)"}),
+                hide_index=True,
+                use_container_width=True,
+            )
+
+# ── Tab 2: Ask the AI ───────────────────────────────────────────────────────
+with tab_ask:
+    from config.settings import ANTHROPIC_API_KEY, CURRENT_SEASON_STR as _cur_season
+
+    if not ANTHROPIC_API_KEY:
+        st.info(
+            "The AI analyst isn't available in this environment. "
+            "Explore the other tabs to see the predictions!"
+        )
+    else:
+        try:
+            from pipeline.agent.analyst import answer_question, get_team_scouting_report
+            _analyst_ok = True
+        except Exception as _e:
+            st.error(f"Could not load analyst module: {_e}")
+            _analyst_ok = False
+
+        if _analyst_ok:
+            if "analyst_messages" not in st.session_state:
+                st.session_state.analyst_messages = []
+            if "analyst_history" not in st.session_state:
+                st.session_state.analyst_history = []
+            if "analyst_full_context" not in st.session_state:
+                st.session_state.analyst_full_context = build_analyst_context()
+            if "ai_prefill" not in st.session_state:
+                st.session_state.ai_prefill = None
+
+            _model_context = {
+                "season": _cur_season,
+                "full_context": st.session_state.analyst_full_context,
+            }
+
+            st.markdown(
+                "<div style='font-size:1.5rem;font-weight:700;margin-bottom:0.3rem;'>Ask me anything about the NBA playoffs</div>",
+                unsafe_allow_html=True,
+            )
+            st.caption("Powered by Claude AI — ask about teams, matchups, predictions, or how the model works.")
+
+            # Starter question buttons
+            _starters = [
+                "Who's going to win the championship? 🏆",
+                "Any surprise teams this year? 📈",
+                "How does the model work? 🧠",
+                "Who are the biggest upsets waiting to happen? ⚡",
+            ]
+            _sq_cols = st.columns(len(_starters))
+            for _sq_col, _sq in zip(_sq_cols, _starters):
+                if _sq_col.button(_sq, use_container_width=True, key=f"starter_{_sq[:15]}"):
+                    st.session_state.ai_prefill = _sq
+
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            # Scouting report in expander
+            with st.expander("📋 Generate a team scouting report"):
+                _all_teams = sorted(current_preds_df["TEAM_ABBR"].tolist()) if not current_preds_df.empty else (title_df["TEAM_ABBR"].tolist() if not title_df.empty else [])
+                if _all_teams:
+                    _col1, _col2 = st.columns([2, 1])
+                    with _col1:
+                        _scout_team = st.selectbox("Choose a team:", _all_teams, key="analyst_scout_team", label_visibility="collapsed")
+                    with _col2:
+                        if st.button("Generate", key="analyst_report_btn", use_container_width=True):
+                            _team_stats = build_team_context(_scout_team)
+                            _title_prob = _team_stats.get("title_prob", 0.0)
+                            _prompt_text = f"Give me a playoff scouting report for {_scout_team}."
+                            with st.spinner("Generating scouting report…"):
+                                try:
+                                    _report = get_team_scouting_report(_scout_team, _team_stats, _title_prob)
+                                    st.session_state.analyst_messages.append({"role": "user", "content": _prompt_text})
+                                    st.session_state.analyst_messages.append({"role": "assistant", "content": _report})
+                                    st.session_state.analyst_history.append({"role": "user", "content": _prompt_text})
+                                    st.session_state.analyst_history.append({"role": "assistant", "content": _report})
+                                    st.rerun()
+                                except Exception as _err:
+                                    st.error(f"Analyst error: {_err}")
+
+            # Chat history display
+            for _msg in st.session_state.analyst_messages:
+                with st.chat_message(_msg["role"]):
+                    st.markdown(_msg["content"])
+
+            # Handle prefill from starter buttons (pop clears it after one use)
+            _prefill = st.session_state.pop("ai_prefill", None)
+
+            # Chat input — prefill wins if set (button was just clicked)
+            _user_input = _prefill or st.chat_input("Ask about teams, matchups, predictions…")
+            if _user_input:
+                st.session_state.analyst_messages.append({"role": "user", "content": _user_input})
+                with st.chat_message("user"):
+                    st.markdown(_user_input)
+                with st.chat_message("assistant"):
+                    with st.spinner("Thinking…"):
+                        try:
+                            _answer, _updated_hist = answer_question(_user_input, _model_context, st.session_state.analyst_history)
+                            st.markdown(_answer)
+                            st.session_state.analyst_messages.append({"role": "assistant", "content": _answer})
+                            st.session_state.analyst_history = _updated_hist
+                        except Exception as _err:
+                            _err_msg = f"Error: {_err}"
+                            st.error(_err_msg)
+                            st.session_state.analyst_messages.append({"role": "assistant", "content": _err_msg})
+
+# ── Tab 3: The Bracket ──────────────────────────────────────────────────────
+with tab_bracket:
+    if series_df.empty:
+        st.info("Run the simulation pipeline to generate bracket predictions.")
+    else:
+        st.markdown("<div class='section-label'>Projected First-Round Matchups</div>", unsafe_allow_html=True)
+        st.caption("Plain-English series previews based on 10,000 simulated brackets.")
+
+        round_order = ["First Round", "Conference Semifinals", "Conference Finals", "NBA Finals"]
+        first_round = series_df[series_df["round"] == "First Round"].copy()
+        first_round["_conf_sort"] = first_round["conference"].map({"East": 0, "West": 1})
+        first_round = first_round.sort_values(["_conf_sort", "high_seed"])
+
+        for _, sr in first_round.iterrows():
+            high = str(sr["high_team"])
+            low = str(sr["low_team"])
+            high_prob = float(sr["high_team_win_prob"])
+            low_prob = float(sr["low_team_win_prob"])
+            winner = str(sr["predicted_winner"])
+            win_prob = high_prob if winner == high else low_prob
+            win_city = team_full_name(winner, city_only=True)
+            lose_city = team_full_name(low if winner == high else high, city_only=True)
+            mlg = int(sr.get("most_likely_games", 6) or 6)
+            heavy = "heavy " if win_prob > 0.70 else ""
+            conf = str(sr.get("conference", ""))
+
+            plain = (
+                f"**{team_full_name(high, city_only=True)} vs {team_full_name(low, city_only=True)}** "
+                f"({conf}) — {win_city} are {heavy}favored with a **{win_prob:.0%} chance** to advance. "
+                f"Series likely goes **{mlg} games**."
+            )
+            c_logo, c_text = st.columns([1, 10])
+            with c_logo:
+                st.image(logo_url(winner), width=36)
+            with c_text:
+                st.markdown(plain)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        with st.expander("📊 Show full bracket & technical series detail"):
+            render_playoff_bracket_board(series_df)
+            st.markdown("---")
+            st.markdown("<div class='section-label'>Series Detail</div>", unsafe_allow_html=True)
+            sorted_series = series_df.copy()
+            sorted_series["_ro"] = sorted_series["round"].map(lambda x: round_order.index(x) if x in round_order else 9)
+            sorted_series = sorted_series.sort_values(["_ro", "conference", "high_seed"])
+            series_labels_b = [
+                (f"{r['conference'] if r['round'] != 'NBA Finals' else 'Finals'} "
+                 f"{r['round'].replace('Conference ', '')}: {r['high_team']} vs {r['low_team']}")
+                for _, r in sorted_series.iterrows()
+            ]
+            series_keys_b = [f"{r['round']}|{r['conference']}|{r['high_team']}" for _, r in sorted_series.iterrows()]
+            selected_label_b = st.selectbox("Select a series:", series_labels_b, key="selected_series_b")
+            if selected_label_b:
+                sel_idx_b = series_labels_b.index(selected_label_b)
+                sel_key_b = series_keys_b[sel_idx_b]
+                sel_row_b = sorted_series.iloc[sel_idx_b]
+                high_team_b = str(sel_row_b["high_team"])
+                low_team_b = str(sel_row_b["low_team"])
+                high_prob_b = float(sel_row_b["high_team_win_prob"])
+                low_prob_b = float(sel_row_b["low_team_win_prob"])
+                winner_b = str(sel_row_b["predicted_winner"])
+                win_prob_b = high_prob_b if winner_b == high_team_b else low_prob_b
+                col_h_b, col_vs_b, col_l_b = st.columns([2, 1, 2])
+                with col_h_b:
+                    st.image(logo_url(high_team_b), width=72)
+                    st.markdown(f"**{high_team_b}** (Seed {int(sel_row_b['high_seed'])})")
+                    st.markdown(f"Win prob: **{high_prob_b:.1%}**")
+                with col_vs_b:
+                    st.markdown("<div style='text-align:center;font-size:1.4rem;font-weight:700;padding-top:1.5rem;'>vs</div>", unsafe_allow_html=True)
+                with col_l_b:
+                    st.image(logo_url(low_team_b), width=72)
+                    st.markdown(f"**{low_team_b}** (Seed {int(sel_row_b['low_seed'])})")
+                    st.markdown(f"Win prob: **{low_prob_b:.1%}**")
+                st.markdown(f"**Projected winner: {winner_b}** ({win_prob_b:.1%})")
+                st.progress(win_prob_b if winner_b == high_team_b else 1 - win_prob_b)
+                p_cols_b = ["p_4_games", "p_5_games", "p_6_games", "p_7_games"]
+                if all(c in sel_row_b.index for c in p_cols_b):
+                    length_vals_b = [float(sel_row_b[c]) for c in p_cols_b]
+                    mlg_val_b = int(sel_row_b.get("most_likely_games", 6) or 6)
+                    fig_len_b = go.Figure(go.Bar(
+                        x=["4 Games", "5 Games", "6 Games", "7 Games"],
+                        y=[v * 100 for v in length_vals_b],
+                        marker_color=["#2ecc71", "#3498db", "#f39c12", "#e74c3c"],
+                        text=[f"{v:.1%}" for v in length_vals_b],
+                        textposition="outside",
+                    ))
+                    fig_len_b.update_layout(
+                        title=f"Series Length (Most likely: {mlg_val_b} games)",
+                        yaxis_title="Probability (%)", height=280,
+                        margin=dict(t=40, b=20, l=20, r=20), showlegend=False,
+                    )
+                    st.plotly_chart(fig_len_b, use_container_width=True, key=f"len_chart_b_{sel_key_b}")
+
+# ── Tab 4: Details ──────────────────────────────────────────────────────────
+with tab_details:
+    st.info("📊 Technical detail view — the same data powering the other tabs, with model internals exposed.")
+
+with tab_details:
     st.markdown("<div class='section-label'>Projected Final Standings → Play-In</div>", unsafe_allow_html=True)
     render_meta_chips(
         [
@@ -1530,119 +1864,11 @@ with playin_tab:
 
         st.caption("Play-in winners join Seeds 1–6 in the full 16-team field → see the ② Playoff Predictor tab.")
 
-with playoff_tab:
-    st.markdown("<div class='section-label'>Projected Playoff Bracket</div>", unsafe_allow_html=True)
-    render_meta_chips(
-        [
-            ("Metric", "Series winner probability"),
-            ("Source", "app_series_predictions_current"),
-            ("Interpretation", "Projected winners by bracket round"),
-        ]
-    )
-    if series_df.empty:
-        st.info("`app_series_predictions_current` is missing.")
-    else:
-        render_playoff_bracket_board(series_df)
 
-        st.markdown("---")
-        st.markdown("<div class='section-label'>Series Detail</div>", unsafe_allow_html=True)
+    st.markdown("---")
+    st.markdown("<div class='section-label'>Team Breakdown</div>", unsafe_allow_html=True)
 
-        round_order = ["First Round", "Conference Semifinals", "Conference Finals", "NBA Finals"]
-        def _series_label(r: pd.Series) -> str:
-            conf = r["conference"] if r["round"] != "NBA Finals" else "Finals"
-            rnd = r["round"].replace("Conference ", "")
-            return f"{conf} {rnd}: {r['high_team']} vs {r['low_team']}"
-
-        sorted_series = series_df.copy()
-        sorted_series["_ro"] = sorted_series["round"].map(lambda x: round_order.index(x) if x in round_order else 9)
-        sorted_series = sorted_series.sort_values(["_ro", "conference", "high_seed"])
-        series_labels = [_series_label(r) for _, r in sorted_series.iterrows()]
-        series_keys = [f"{r['round']}|{r['conference']}|{r['high_team']}" for _, r in sorted_series.iterrows()]
-
-        selected_label = st.selectbox("Select a series to inspect:", series_labels, key="selected_series")
-        if selected_label:
-            sel_idx = series_labels.index(selected_label)
-            sel_key = series_keys[sel_idx]
-            sel_row = sorted_series.iloc[sel_idx]
-
-            high_team = str(sel_row["high_team"])
-            low_team = str(sel_row["low_team"])
-            high_prob = float(sel_row["high_team_win_prob"])
-            low_prob = float(sel_row["low_team_win_prob"])
-            winner = str(sel_row["predicted_winner"])
-            loser = low_team if winner == high_team else high_team
-            win_prob = high_prob if winner == high_team else low_prob
-
-            # Header: logos + names
-            col_h, col_vs, col_l = st.columns([2, 1, 2])
-            with col_h:
-                st.image(logo_url(high_team), width=72)
-                st.markdown(f"**{high_team}** (Seed {int(sel_row['high_seed'])})")
-                st.markdown(f"Win prob: **{high_prob:.1%}**")
-            with col_vs:
-                st.markdown("<div style='text-align:center;font-size:1.4rem;font-weight:700;padding-top:1.5rem;'>vs</div>", unsafe_allow_html=True)
-            with col_l:
-                st.image(logo_url(low_team), width=72)
-                st.markdown(f"**{low_team}** (Seed {int(sel_row['low_seed'])})")
-                st.markdown(f"Win prob: **{low_prob:.1%}**")
-
-            # Win probability bar
-            st.markdown(f"**Projected winner: {winner}** ({win_prob:.1%})")
-            st.progress(win_prob if winner == high_team else 1 - win_prob)
-
-            # Series length distribution
-            p_cols = ["p_4_games", "p_5_games", "p_6_games", "p_7_games"]
-            if all(c in sel_row.index for c in p_cols):
-                length_vals = [float(sel_row[c]) for c in p_cols]
-                length_labels = ["4 Games", "5 Games", "6 Games", "7 Games"]
-                _game_colors = ["#2ecc71", "#3498db", "#f39c12", "#e74c3c"]
-                mlg_val = int(sel_row.get("most_likely_games", 6) or 6)
-                fig_len = go.Figure(go.Bar(
-                    x=length_labels,
-                    y=[v * 100 for v in length_vals],
-                    marker_color=_game_colors,
-                    text=[f"{v:.1%}" for v in length_vals],
-                    textposition="outside",
-                ))
-                expected = float(sel_row.get("expected_games", 0) or 0)
-                fig_len.update_layout(
-                    title=f"Series Length Distribution (Most likely: {mlg_val} games, Expected: {expected:.1f}g)",
-                    yaxis_title="Probability (%)",
-                    height=280,
-                    margin=dict(t=40, b=20, l=20, r=20),
-                    showlegend=False,
-                )
-                st.plotly_chart(fig_len, use_container_width=True, key=f"len_chart_{sel_key}")
-
-            # Model features comparison
-            if not features_df.empty:
-                feat_cols = [c for c in ["rs_net_rating", "rs_vs_top_teams_win_pct", "rs_off_rating", "rs_def_rating"] if c in features_df.columns]
-                feat_labels = {
-                    "rs_net_rating": "Net Rating",
-                    "rs_vs_top_teams_win_pct": "vs Top Teams W%",
-                    "rs_off_rating": "Off Rating",
-                    "rs_def_rating": "Def Rating",
-                }
-                high_feat = features_df[features_df["TEAM_ABBR"] == high_team]
-                low_feat = features_df[features_df["TEAM_ABBR"] == low_team]
-                if not high_feat.empty or not low_feat.empty:
-                    st.markdown("**Model Feature Comparison**")
-                    feat_header = st.columns([2, 1, 1])
-                    feat_header[0].markdown("**Feature**")
-                    feat_header[1].markdown(f"**{high_team}**")
-                    feat_header[2].markdown(f"**{low_team}**")
-                    for fc in feat_cols:
-                        hv = float(high_feat.iloc[0][fc]) if not high_feat.empty else float("nan")
-                        lv = float(low_feat.iloc[0][fc]) if not low_feat.empty else float("nan")
-                        row_cols = st.columns([2, 1, 1])
-                        row_cols[0].markdown(feat_labels.get(fc, fc))
-                        h_bold = "**" if hv >= lv else ""
-                        l_bold = "**" if lv >= hv else ""
-                        fmt = ".3f" if "win_pct" in fc else ".1f"
-                        row_cols[1].markdown(f"{h_bold}{hv:{fmt}}{h_bold}" if not pd.isna(hv) else "—")
-                        row_cols[2].markdown(f"{l_bold}{lv:{fmt}}{l_bold}" if not pd.isna(lv) else "—")
-
-with team_tab:
+with tab_details:
     st.markdown("<div class='section-label'>All 30 Teams Drilldown</div>", unsafe_allow_html=True)
 
     all_teams = teams_df["TEAM_ABBR"].dropna().tolist() if not teams_df.empty else []
@@ -1959,111 +2185,3 @@ with team_tab:
                 },
             )
 
-with analyst_tab:
-    from config.settings import ANTHROPIC_API_KEY, CURRENT_SEASON_STR as _cur_season
-
-    if not ANTHROPIC_API_KEY:
-        st.warning(
-            "AI Analyst requires an **ANTHROPIC_API_KEY**. "
-            "Add it under Space Settings → Variables and secrets."
-        )
-    else:
-        try:
-            from pipeline.agent.analyst import answer_question, get_team_scouting_report
-            _analyst_ok = True
-        except Exception as _e:
-            st.error(f"Could not load analyst module: {_e}")
-            _analyst_ok = False
-
-        if _analyst_ok:
-            # Session state
-            if "analyst_messages" not in st.session_state:
-                st.session_state.analyst_messages = []
-            if "analyst_history" not in st.session_state:
-                st.session_state.analyst_history = []
-
-            # Build full model context from all loaded tables (cached per session)
-            if "analyst_full_context" not in st.session_state:
-                st.session_state.analyst_full_context = build_analyst_context()
-            _model_context = {
-                "season": _cur_season,
-                "full_context": st.session_state.analyst_full_context,
-            }
-
-            st.markdown(
-                "<div class='section-label'>Ask about predictions, teams, or the model</div>",
-                unsafe_allow_html=True,
-            )
-
-            # Quick scouting report — any of the 30 teams
-            _all_teams = sorted(current_preds_df["TEAM_ABBR"].tolist()) if not current_preds_df.empty else (title_df["TEAM_ABBR"].tolist() if not title_df.empty else [])
-            if _all_teams:
-                _col1, _col2 = st.columns([2, 1])
-                with _col1:
-                    _scout_team = st.selectbox(
-                        "Quick scouting report",
-                        _all_teams,
-                        key="analyst_scout_team",
-                        label_visibility="collapsed",
-                    )
-                with _col2:
-                    if st.button("Generate report", key="analyst_report_btn", use_container_width=True):
-                        _team_stats = build_team_context(_scout_team)
-                        _title_prob = _team_stats.get("title_prob", 0.0)
-                        _prompt_text = f"Give me a playoff scouting report for {_scout_team}."
-                        with st.spinner("Generating scouting report…"):
-                            try:
-                                _report = get_team_scouting_report(
-                                    _scout_team,
-                                    _team_stats,
-                                    _title_prob,
-                                )
-                                st.session_state.analyst_messages.append(
-                                    {"role": "user", "content": _prompt_text}
-                                )
-                                st.session_state.analyst_messages.append(
-                                    {"role": "assistant", "content": _report}
-                                )
-                                st.session_state.analyst_history.append(
-                                    {"role": "user", "content": _prompt_text}
-                                )
-                                st.session_state.analyst_history.append(
-                                    {"role": "assistant", "content": _report}
-                                )
-                                st.rerun()
-                            except Exception as _err:
-                                st.error(f"Analyst error: {_err}")
-
-            st.divider()
-
-            # Chat history
-            for _msg in st.session_state.analyst_messages:
-                with st.chat_message(_msg["role"]):
-                    st.markdown(_msg["content"])
-
-            # Chat input
-            if _user_input := st.chat_input("Ask about teams, model features, predictions…"):
-                st.session_state.analyst_messages.append(
-                    {"role": "user", "content": _user_input}
-                )
-                with st.chat_message("user"):
-                    st.markdown(_user_input)
-                with st.chat_message("assistant"):
-                    with st.spinner("Thinking…"):
-                        try:
-                            _answer, _updated_hist = answer_question(
-                                _user_input,
-                                _model_context,
-                                st.session_state.analyst_history,
-                            )
-                            st.markdown(_answer)
-                            st.session_state.analyst_messages.append(
-                                {"role": "assistant", "content": _answer}
-                            )
-                            st.session_state.analyst_history = _updated_hist
-                        except Exception as _err:
-                            _err_msg = f"Error: {_err}"
-                            st.error(_err_msg)
-                            st.session_state.analyst_messages.append(
-                                {"role": "assistant", "content": _err_msg}
-                            )
