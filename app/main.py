@@ -116,7 +116,7 @@ def load_base_tables() -> dict[str, pd.DataFrame]:
         """,
         "current_preds": f"""
             SELECT TEAM_ABBR, conference, wins, losses, win_pct, pred_rank_all_30,
-                   playoff_seed, title_prob_proxy_all_30
+                   playoff_rank, playoff_seed, title_prob_proxy_all_30
             FROM current_season_predictions
             WHERE SEASON = '{CURRENT_SEASON_STR}'
             ORDER BY pred_rank_all_30
@@ -1082,11 +1082,11 @@ with playin_tab:
                     conf_preds = (
                         current_preds_df[current_preds_df["conference"] == conf_name]
                         .copy()
-                        .sort_values("playoff_seed")
+                        .sort_values("playoff_rank")
                     )
-                    # seeds 5-12
+                    # seeds 5-12 by conference standing rank
                     bubble = conf_preds[
-                        (conf_preds["playoff_seed"] >= 5) & (conf_preds["playoff_seed"] <= 12)
+                        (conf_preds["playoff_rank"] >= 5) & (conf_preds["playoff_rank"] <= 12)
                     ].copy()
 
                     if not bubble.empty:
@@ -1106,7 +1106,7 @@ with playin_tab:
                         st.markdown("**Bubble Standings (Seeds 5–12)**")
                         rows_html = ""
                         for br in bubble.itertuples(index=False):
-                            seed = int(br.playoff_seed)
+                            seed = int(br.playoff_rank)
                             abbr = br.TEAM_ABBR
                             record = f"{int(br.wins)}-{int(br.losses)}"
                             gb = float(br.gb)
@@ -1135,7 +1135,7 @@ with playin_tab:
                             if seed <= 6:
                                 zone = '<span style="background:#D1FAE5;color:#065F46;border-radius:4px;padding:1px 6px;font-size:0.75rem;font-weight:700;">AUTO</span>'
                                 # flag if gap to seed 7 is small
-                                seed7_wins = bubble[bubble["playoff_seed"] == 7]["wins"].values
+                                seed7_wins = bubble[bubble["playoff_rank"] == 7]["wins"].values
                                 if len(seed7_wins) and (int(br.wins) - int(seed7_wins[0])) <= 2:
                                     zone += ' <span style="background:#FEF3C7;color:#92400E;border-radius:4px;padding:1px 5px;font-size:0.72rem;">WATCH</span>'
                             elif seed <= 10:
