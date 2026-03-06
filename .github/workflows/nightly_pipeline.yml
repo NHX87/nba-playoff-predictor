@@ -134,6 +134,8 @@ jobs:
               "loyo_series_predictions",
               "current_season_predictions",
               "current_feature_snapshot",
+              "regular_season",       # feeds odds-over-time chart + last-10 hot streaks
+              "raw_player_logs_rs",   # feeds player stats in team drilldown
           ]
 
           src = duckdb.connect("data/processed/nba.duckdb", read_only=True)

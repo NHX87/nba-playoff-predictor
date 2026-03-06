@@ -114,14 +114,18 @@ def identify_rotation_players(player_logs: pd.DataFrame) -> pd.DataFrame:
         (agg['games_played_pct'] >= MIN_GAMES_PLAYED_PCT)
     ].copy()
 
-    # Rank players by minutes within team
+    # Rank players by minutes (kept for reference) and by PPG (used for star flags)
     rotation['minutes_rank'] = rotation.groupby(
         ['TEAM_ID', 'SEASON', 'SEASON_TYPE']
     )['avg_minutes'].rank(ascending=False, method='dense')
 
-    # Flag top 2 players
-    rotation['is_star'] = rotation['minutes_rank'] == 1
-    rotation['is_second_star'] = rotation['minutes_rank'] == 2
+    rotation['ppg_rank'] = rotation.groupby(
+        ['TEAM_ID', 'SEASON', 'SEASON_TYPE']
+    )['avg_pts'].rank(ascending=False, method='dense')
+
+    # Flag top 2 players by PPG
+    rotation['is_star'] = rotation['ppg_rank'] == 1
+    rotation['is_second_star'] = rotation['ppg_rank'] == 2
 
     return rotation
 

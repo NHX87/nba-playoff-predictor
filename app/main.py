@@ -31,8 +31,15 @@ def pct(val: float) -> str:
     return f"{val:.1%}"
 
 
+# NBA API abbreviations that differ from ESPN CDN slugs
+_ESPN_SLUG: dict[str, str] = {
+    "NOP": "no", "UTA": "utah", "GSW": "gs", "SAS": "sa", "NYK": "ny",
+}
+
+
 def logo_url(team_abbr: str) -> str:
-    return f"https://a.espncdn.com/i/teamlogos/nba/500/scoreboard/{team_abbr.lower()}.png"
+    slug = _ESPN_SLUG.get(team_abbr.upper(), team_abbr.lower())
+    return f"https://a.espncdn.com/i/teamlogos/nba/500/scoreboard/{slug}.png"
 
 
 def _to_dt(series: pd.Series) -> pd.Series:
@@ -154,7 +161,12 @@ def load_base_tables() -> dict[str, pd.DataFrame]:
 def build_team_title_odds_series(
     rs_df: pd.DataFrame, title_df: pd.DataFrame, team_abbr: str
 ) -> pd.DataFrame:
-    """Create current-season implied title odds path calibrated to current displayed title odds."""
+    """Build implied title odds trajectory from RS win% + net rating softmax.
+
+    Shows the raw relative strength of this team vs all 30 teams on each game
+    date — no endpoint scaling so historical values reflect what the model
+    would have said at that point in the season.
+    """
     if rs_df.empty:
         return pd.DataFrame()
 
@@ -192,28 +204,11 @@ def build_team_title_odds_series(
     if team_daily.empty:
         return pd.DataFrame()
 
-    # Calibrate endpoint to displayed current title odds so chart and KPI align.
-    current_prob = None
-    if not title_df.empty and team_abbr in set(title_df["TEAM_ABBR"]):
-        current_prob = float(title_df[title_df["TEAM_ABBR"] == team_abbr].iloc[0]["title_prob"])
-
-    if current_prob is not None and pd.notna(current_prob):
-        last_val = float(team_daily["implied_title_prob"].iloc[-1])
-        if last_val > 0:
-            scale = current_prob / last_val
-            team_daily["title_odds"] = np.clip(team_daily["implied_title_prob"] * scale, 0, 1)
-        else:
-            team_daily["title_odds"] = team_daily["implied_title_prob"]
-    else:
-        team_daily["title_odds"] = team_daily["implied_title_prob"]
-
-    # Smooth for readability but preserve the latest point so it aligns with current title odds.
-    smoothed = team_daily["title_odds"].ewm(span=6, adjust=False).mean()
-    if not smoothed.empty:
-        smoothed = smoothed + (team_daily["title_odds"].iloc[-1] - smoothed.iloc[-1])
+    # Smooth for readability without distorting historical shape.
+    smoothed = team_daily["implied_title_prob"].ewm(span=6, adjust=False).mean()
     team_daily["title_odds_smoothed"] = np.clip(smoothed, 0, 1)
 
-    team_daily["title_odds_pct"] = team_daily["title_odds"] * 100.0
+    team_daily["title_odds_pct"] = team_daily["implied_title_prob"] * 100.0
     team_daily["title_odds_smoothed_pct"] = team_daily["title_odds_smoothed"] * 100.0
     return team_daily[["GAME_DATE", "title_odds_pct", "title_odds_smoothed_pct"]]
 
@@ -1024,12 +1019,12 @@ playin_tab, playoff_tab, team_tab, analyst_tab = st.tabs(
 )
 
 with playin_tab:
-    st.markdown("<div class='section-label'>Play-In Qualification Probabilities</div>", unsafe_allow_html=True)
+    st.markdown("<div class='section-label'>Play-In Race & Standings Bubble</div>", unsafe_allow_html=True)
     render_meta_chips(
         [
             ("Metric", "Make playoffs probability"),
-            ("Source", "app_play_in_current"),
-            ("Interpretation", "Projected 7/8 play-in outcomes"),
+            ("Source", "app_play_in_current + current_season_predictions"),
+            ("Interpretation", "Seeds 5-12 bubble context + play-in odds"),
         ]
     )
     if play_in_df.empty:
@@ -1040,23 +1035,98 @@ with playin_tab:
             lambda r: 7 if float(r["seed7_prob"]) >= float(r["seed8_prob"]) else 8,
             axis=1,
         )
-        p = p.sort_values(["conference", "made_playoffs_prob"], ascending=[True, False])
+        # Build a lookup of play-in probs by team
+        playin_lookup = {row.team_abbr: row for row in p.itertuples(index=False)}
 
-        east = p[p["conference"] == "East"].copy()
-        west = p[p["conference"] == "West"].copy()
+        # Hot streak: last 10 W-L per team from regular_season
+        def _hot_streak(team: str) -> str:
+            if rs_df.empty:
+                return ""
+            t = rs_df[rs_df["TEAM_ABBR"] == team].sort_values("GAME_DATE")
+            if t.empty:
+                return ""
+            last10 = t.tail(10)
+            w = int((last10["WL"] == "W").sum())
+            l = int((last10["WL"] == "L").sum())
+            color = "#059669" if w >= 7 else ("#DC2626" if w <= 3 else "#6B7280")
+            return f'<span style="color:{color};font-weight:700;font-size:0.82rem;">{w}-{l} L10</span>'
 
         conf_left, conf_right = st.columns(2)
-        for conf_df, conf_name, mount in [
-            (east, "East", conf_left),
-            (west, "West", conf_right),
-        ]:
+        for conf_name, mount in [("East", conf_left), ("West", conf_right)]:
             with mount:
-                st.markdown(f"### {conf_name} Play-In")
-                if conf_df.empty:
+                st.markdown(f"### {conf_name}")
+
+                # ── Standings bubble (seeds 5-12) ──────────────────────────
+                if not current_preds_df.empty:
+                    conf_preds = (
+                        current_preds_df[current_preds_df["conference"] == conf_name]
+                        .copy()
+                        .sort_values("playoff_seed")
+                    )
+                    # seeds 5-12
+                    bubble = conf_preds[
+                        (conf_preds["playoff_seed"] >= 5) & (conf_preds["playoff_seed"] <= 12)
+                    ].copy()
+
+                    if not bubble.empty:
+                        # Max wins for GB calculation
+                        max_wins = int(bubble.iloc[0]["wins"])
+                        bubble["gb"] = (max_wins - bubble["wins"]) / 1.0
+
+                        st.markdown("**Bubble Standings (Seeds 5–12)**")
+                        rows_html = ""
+                        for br in bubble.itertuples(index=False):
+                            seed = int(br.playoff_seed)
+                            abbr = br.TEAM_ABBR
+                            record = f"{int(br.wins)}-{int(br.losses)}"
+                            gb = float(br.gb)
+                            gb_str = "—" if gb == 0 else f"{gb:.1f}"
+
+                            # Zone badge
+                            if seed <= 6:
+                                zone = '<span style="background:#D1FAE5;color:#065F46;border-radius:4px;padding:1px 6px;font-size:0.75rem;font-weight:700;">AUTO</span>'
+                                # flag if gap to seed 7 is small
+                                seed7_wins = bubble[bubble["playoff_seed"] == 7]["wins"].values
+                                if len(seed7_wins) and (int(br.wins) - int(seed7_wins[0])) <= 2:
+                                    zone += ' <span style="background:#FEF3C7;color:#92400E;border-radius:4px;padding:1px 5px;font-size:0.72rem;">WATCH</span>'
+                            elif seed <= 10:
+                                zone = '<span style="background:#DBEAFE;color:#1E40AF;border-radius:4px;padding:1px 6px;font-size:0.75rem;font-weight:700;">PLAY-IN</span>'
+                            else:
+                                zone = '<span style="background:#F3F4F6;color:#6B7280;border-radius:4px;padding:1px 6px;font-size:0.75rem;font-weight:700;">OUT</span>'
+
+                            hot = _hot_streak(abbr)
+                            rows_html += f"""
+                            <div style="display:flex;align-items:center;gap:0.5rem;padding:0.3rem 0;border-bottom:1px solid #F3F4F6;">
+                                <span style="color:#9CA3AF;font-size:0.8rem;width:1.4rem;text-align:right;">{seed}</span>
+                                <img src="{logo_url(abbr)}" width="20" height="20" style="border-radius:50%;" />
+                                <span style="font-weight:700;font-size:0.9rem;width:2.5rem;">{abbr}</span>
+                                <span style="color:#374151;font-size:0.85rem;width:4rem;">{record}</span>
+                                <span style="color:#9CA3AF;font-size:0.8rem;width:3rem;">{gb_str} GB</span>
+                                {zone}
+                                <span style="margin-left:auto;">{hot}</span>
+                            </div>"""
+                        st.markdown(
+                            f'<div style="background:#FAFAFA;border:1px solid #E4E7EE;border-radius:8px;padding:0.5rem 0.75rem;margin-bottom:1rem;">{rows_html}</div>',
+                            unsafe_allow_html=True,
+                        )
+
+                # ── Play-in cards (seeds 7-10) ──────────────────────────
+                st.markdown("**Play-In Teams**")
+                conf_playin = p[p["conference"] == conf_name].sort_values(
+                    "made_playoffs_prob", ascending=False
+                )
+                if conf_playin.empty:
                     st.caption("No teams found.")
                     continue
 
-                for row in conf_df.itertuples(index=False):
+                for row in conf_playin.itertuples(index=False):
+                    hot = _hot_streak(row.team_abbr)
+                    # Seed from current_preds if available
+                    seed_num = ""
+                    if not current_preds_df.empty:
+                        match = current_preds_df[current_preds_df["TEAM_ABBR"] == row.team_abbr]
+                        if not match.empty:
+                            seed_num = f"#{int(match.iloc[0]['playoff_seed'])} · "
                     st.markdown(
                         f"""
                         <div style="
@@ -1072,10 +1142,23 @@ with playin_tab:
                             box-shadow:0 1px 3px rgba(0,0,0,0.05);">
                             <div style="display:flex;align-items:center;gap:0.55rem;">
                                 <img src="{logo_url(row.team_abbr)}" width="30" height="30" style="border-radius:50%;" />
-                                <div style="font-weight:700;color:#111827;">{row.team_abbr}</div>
+                                <div>
+                                    <div style="font-weight:700;color:#111827;">{seed_num}{row.team_abbr}</div>
+                                    <div style="font-size:0.78rem;margin-top:2px;">{hot}</div>
+                                </div>
                             </div>
-                            <div style="color:#6B7280;font-size:0.86rem;">Proj Seed: <span style="color:#111827;font-weight:700;">{int(row.projected_seed)}</span></div>
-                            <div style="color:#6B7280;font-size:0.86rem;">Make Playoffs: <span style="color:#059669;font-weight:700;">{float(row.made_playoffs_prob):.1%}</span></div>
+                            <div style="text-align:center;">
+                                <div style="color:#6B7280;font-size:0.75rem;">Seed 7</div>
+                                <div style="font-weight:700;color:#111827;">{float(row.seed7_prob):.1%}</div>
+                            </div>
+                            <div style="text-align:center;">
+                                <div style="color:#6B7280;font-size:0.75rem;">Seed 8</div>
+                                <div style="font-weight:700;color:#111827;">{float(row.seed8_prob):.1%}</div>
+                            </div>
+                            <div style="text-align:center;">
+                                <div style="color:#6B7280;font-size:0.75rem;">Make Playoffs</div>
+                                <div style="font-weight:700;color:#059669;">{float(row.made_playoffs_prob):.1%}</div>
+                            </div>
                         </div>
                         """,
                         unsafe_allow_html=True,
@@ -1094,6 +1177,102 @@ with playoff_tab:
         st.info("`app_series_predictions_current` is missing.")
     else:
         render_playoff_bracket_board(series_df)
+
+        st.markdown("---")
+        st.markdown("<div class='section-label'>Series Detail</div>", unsafe_allow_html=True)
+
+        round_order = ["First Round", "Conference Semifinals", "Conference Finals", "NBA Finals"]
+        def _series_label(r: pd.Series) -> str:
+            conf = r["conference"] if r["round"] != "NBA Finals" else "Finals"
+            rnd = r["round"].replace("Conference ", "")
+            return f"{conf} {rnd}: {r['high_team']} vs {r['low_team']}"
+
+        sorted_series = series_df.copy()
+        sorted_series["_ro"] = sorted_series["round"].map(lambda x: round_order.index(x) if x in round_order else 9)
+        sorted_series = sorted_series.sort_values(["_ro", "conference", "high_seed"])
+        series_labels = [_series_label(r) for _, r in sorted_series.iterrows()]
+        series_keys = [f"{r['round']}|{r['conference']}|{r['high_team']}" for _, r in sorted_series.iterrows()]
+
+        selected_label = st.selectbox("Select a series to inspect:", series_labels, key="selected_series")
+        if selected_label:
+            sel_idx = series_labels.index(selected_label)
+            sel_key = series_keys[sel_idx]
+            sel_row = sorted_series.iloc[sel_idx]
+
+            high_team = str(sel_row["high_team"])
+            low_team = str(sel_row["low_team"])
+            high_prob = float(sel_row["high_team_win_prob"])
+            low_prob = float(sel_row["low_team_win_prob"])
+            winner = str(sel_row["predicted_winner"])
+            loser = low_team if winner == high_team else high_team
+            win_prob = high_prob if winner == high_team else low_prob
+
+            # Header: logos + names
+            col_h, col_vs, col_l = st.columns([2, 1, 2])
+            with col_h:
+                st.image(logo_url(high_team), width=72)
+                st.markdown(f"**{high_team}** (Seed {int(sel_row['high_seed'])})")
+                st.markdown(f"Win prob: **{high_prob:.1%}**")
+            with col_vs:
+                st.markdown("<div style='text-align:center;font-size:1.4rem;font-weight:700;padding-top:1.5rem;'>vs</div>", unsafe_allow_html=True)
+            with col_l:
+                st.image(logo_url(low_team), width=72)
+                st.markdown(f"**{low_team}** (Seed {int(sel_row['low_seed'])})")
+                st.markdown(f"Win prob: **{low_prob:.1%}**")
+
+            # Win probability bar
+            st.markdown(f"**Projected winner: {winner}** ({win_prob:.1%})")
+            st.progress(win_prob if winner == high_team else 1 - win_prob)
+
+            # Series length distribution
+            p_cols = ["p_4_games", "p_5_games", "p_6_games", "p_7_games"]
+            if all(c in sel_row.index for c in p_cols):
+                length_vals = [float(sel_row[c]) for c in p_cols]
+                length_labels = ["4 Games", "5 Games", "6 Games", "7 Games"]
+                fig_len = go.Figure(go.Bar(
+                    x=length_labels,
+                    y=[v * 100 for v in length_vals],
+                    marker_color=[TEAM_COLORS.get(winner, "#35a7ff")] * 4,
+                    text=[f"{v:.1%}" for v in length_vals],
+                    textposition="outside",
+                ))
+                expected = float(sel_row.get("expected_games", 0) or 0)
+                fig_len.update_layout(
+                    title=f"Series Length Distribution (Expected: {expected:.1f} games)",
+                    yaxis_title="Probability (%)",
+                    height=280,
+                    margin=dict(t=40, b=20, l=20, r=20),
+                    showlegend=False,
+                )
+                st.plotly_chart(fig_len, use_container_width=True, key=f"len_chart_{sel_key}")
+
+            # Model features comparison
+            if not features_df.empty:
+                feat_cols = [c for c in ["rs_net_rating", "rs_vs_top_teams_win_pct", "rs_off_rating", "rs_def_rating"] if c in features_df.columns]
+                feat_labels = {
+                    "rs_net_rating": "Net Rating",
+                    "rs_vs_top_teams_win_pct": "vs Top Teams W%",
+                    "rs_off_rating": "Off Rating",
+                    "rs_def_rating": "Def Rating",
+                }
+                high_feat = features_df[features_df["TEAM_ABBR"] == high_team]
+                low_feat = features_df[features_df["TEAM_ABBR"] == low_team]
+                if not high_feat.empty or not low_feat.empty:
+                    st.markdown("**Model Feature Comparison**")
+                    feat_header = st.columns([2, 1, 1])
+                    feat_header[0].markdown("**Feature**")
+                    feat_header[1].markdown(f"**{high_team}**")
+                    feat_header[2].markdown(f"**{low_team}**")
+                    for fc in feat_cols:
+                        hv = float(high_feat.iloc[0][fc]) if not high_feat.empty else float("nan")
+                        lv = float(low_feat.iloc[0][fc]) if not low_feat.empty else float("nan")
+                        row_cols = st.columns([2, 1, 1])
+                        row_cols[0].markdown(feat_labels.get(fc, fc))
+                        h_bold = "**" if hv >= lv else ""
+                        l_bold = "**" if lv >= hv else ""
+                        fmt = ".3f" if "win_pct" in fc else ".1f"
+                        row_cols[1].markdown(f"{h_bold}{hv:{fmt}}{h_bold}" if not pd.isna(hv) else "—")
+                        row_cols[2].markdown(f"{l_bold}{lv:{fmt}}{l_bold}" if not pd.isna(lv) else "—")
 
 with team_tab:
     st.markdown("<div class='section-label'>All 30 Teams Drilldown</div>", unsafe_allow_html=True)
@@ -1125,14 +1304,23 @@ with team_tab:
             else:
                 st.metric("Current Title Odds", value="-")
 
+        # Round-by-round odds row
+        if not team_title.empty:
+            r2, rcf, rf, rt = st.columns(4)
+            tr = team_title.iloc[0]
+            r2.metric("Make Round 2", pct(float(tr.get("make_second_round_prob", 0) or 0)))
+            rcf.metric("Conf Finals", pct(float(tr.get("make_conf_finals_prob", 0) or 0)))
+            rf.metric("Finals", pct(float(tr.get("make_finals_prob", 0) or 0)))
+            rt.metric("Title", pct(float(tr.get("title_prob", 0) or 0)))
+
         c1, c2 = st.columns([1.45, 1.0])
         with c1:
             st.markdown("<div class='section-label'>Odds Over Time (Current Season)</div>", unsafe_allow_html=True)
             render_meta_chips(
                 [
-                    ("Metric", "Calibrated title odds path"),
-                    ("Source", "regular_season + app_title_odds_current"),
-                    ("Smoothing", "EWM span=6, endpoint-preserving"),
+                    ("Metric", "Implied title odds path"),
+                    ("Source", "regular_season (win% + net rating softmax)"),
+                    ("Smoothing", "EWM span=6"),
                 ]
             )
             traj = build_team_title_odds_series(rs_df, title_df, team_abbr)
@@ -1162,7 +1350,7 @@ with team_tab:
             )
             st.plotly_chart(fig, width="stretch")
             st.caption(
-                "Current-season title-odds path is model-implied and calibrated so the latest point matches the displayed current title odds."
+                "Implied title odds based on RS win% + net rating softmax vs all 30 teams on each game date. Reflects actual relative strength at each point in the season."
             )
 
         with c2:
@@ -1183,13 +1371,15 @@ with team_tab:
                 )
 
             proj = team_next10_projection(rs_df, features_df, team_abbr)
+            n_available = proj["games_available"]
             st.metric(
-                "Next 10 Projected W-L",
-                value=f"{proj['projected_wins']:.1f}-{proj['projected_losses']:.1f}",
+                f"Next {n_available} Projected W-L",
+                value=f"{proj['projected_wins']:.1f}W – {proj['projected_losses']:.1f}L",
             )
             st.caption(
-                f"Games available: {proj['games_available']} | Per-game win prob: {proj['win_prob_per_game']:.1%} | "
-                f"range: {proj['range_low']}-{proj['range_high']} wins"
+                f"Expected {proj['projected_wins']:.1f}W – {proj['projected_losses']:.1f}L over next {n_available} games "
+                f"(confidence range: {proj['range_low']}–{proj['range_high']} wins). "
+                "Based on team strength vs league average — upcoming schedule not yet integrated."
             )
 
         st.markdown("<div class='section-label'>Player Stats (Current Season)</div>", unsafe_allow_html=True)
