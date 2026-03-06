@@ -24,6 +24,15 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Snapshot row counts before fetch
+        run: |
+          python - <<'EOF' > /tmp/before_counts.txt
+          import pandas as pd, glob, json
+          counts = {f: len(pd.read_parquet(f)) for f in glob.glob("data/raw/*2025-26*.parquet")}
+          print(json.dumps(counts))
+          EOF
+          cat /tmp/before_counts.txt
+
       - name: Bust 2025-26 cache
         run: rm -f data/raw/*2025-26*.parquet
 
@@ -32,12 +41,25 @@ jobs:
           python -m pipeline.ingestion.fetch_games
           python -m pipeline.ingestion.fetch_players
 
-      - name: Commit updated parquets
+      - name: Commit updated parquets if data changed
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/raw/*2025-26*.parquet
-          git diff --cached --quiet && echo "Parquets unchanged, skipping commit." || (git commit -m "chore: refresh 2025-26 parquets" && git push)
+          python - <<'EOF'
+          import pandas as pd, glob, json, subprocess, sys
+
+          before = json.loads(open("/tmp/before_counts.txt").read())
+          after  = {f: len(pd.read_parquet(f)) for f in glob.glob("data/raw/*2025-26*.parquet")}
+
+          if before == after:
+              print("Row counts unchanged — skipping commit.")
+              sys.exit(0)
+
+          print(f"Data changed: {before} -> {after}")
+          subprocess.run(["git", "config", "user.name",  "github-actions[bot]"], check=True)
+          subprocess.run(["git", "config", "user.email", "github-actions[bot]@users.noreply.github.com"], check=True)
+          subprocess.run(["git", "add"] + glob.glob("data/raw/*2025-26*.parquet"), check=True)
+          subprocess.run(["git", "commit", "-m", "chore: refresh 2025-26 parquets"], check=True)
+          subprocess.run(["git", "push"], check=True)
+          EOF
 
   pipeline:
     name: Train models and push to HF Spaces
