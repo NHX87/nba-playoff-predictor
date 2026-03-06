@@ -71,6 +71,7 @@ jobs:
               print("Nothing staged after add — skipping commit.")
               sys.exit(0)
           subprocess.run(["git", "commit", "-m", "chore: refresh 2025-26 parquets"], check=True)
+          subprocess.run(["git", "pull", "--rebase"], check=True)
           subprocess.run(["git", "push"], check=True)
           EOF
 
