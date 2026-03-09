@@ -1613,12 +1613,12 @@ with tab_who:
             # Tile card — clicking logo toggles detail panel
             tile_cols = st.columns([0.06, 0.79, 0.15])
             with tile_cols[0]:
-                clicked = st.button(
-                    abbr, key=f"who_{abbr}", type="tertiary",
+                if st.button(
+                    f"![{abbr}]({logo_url(abbr)})",
+                    key=f"who_{abbr}",
+                    type="tertiary",
                     help=f"Click for {full_name} details",
-                    use_container_width=True,
-                )
-                if clicked:
+                ):
                     st.session_state.who_selected = None if is_selected else abbr
                     st.rerun()
             with tile_cols[1]:
