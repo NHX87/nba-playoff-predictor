@@ -1571,14 +1571,15 @@ with tab_who:
         unsafe_allow_html=True,
     )
 
-    # Championship odds leaderboard — horizontal bar chart
+    # Championship odds leaderboard — clickable tiles with inline detail
     st.markdown("<div class='section-label'>Championship Odds — All Playoff Contenders</div>", unsafe_allow_html=True)
-    st.caption("Based on 10,000 simulated playoff brackets. Click a bar to see team details.")
+    st.caption("Based on 10,000 simulated playoff brackets. Tap a team to see details.")
 
     if title_df.empty:
         st.info("Run the simulation pipeline to generate championship odds.")
     else:
-        sorted_title = title_df.sort_values("title_prob", ascending=True).reset_index(drop=True)
+        sorted_title = title_df.sort_values("title_prob", ascending=False).reset_index(drop=True)
+        max_prob = float(sorted_title["title_prob"].iloc[0])
 
         # Pre-build quick-fact lookups
         _preds_map = {}
@@ -1592,162 +1593,125 @@ with tab_who:
             for team, grp in player_impact_df.groupby("TEAM_ABBR"):
                 _impact_map[team] = grp.sort_values("ppg", ascending=False).head(3)
 
-        # Build bar labels and colors
-        abbrs = sorted_title["TEAM_ABBR"].tolist()
-        probs = (sorted_title["title_prob"] * 100).tolist()
-        labels = []
-        bar_colors = []
-        text_labels = []
-        for _, r in sorted_title.iterrows():
-            a = str(r["TEAM_ABBR"])
-            p = float(r["title_prob"])
-            pr = _preds_map.get(a, {})
-            rec = f"{int(pr['wins'])}-{int(pr['losses'])}" if pr else ""
-            seed_str = ""
-            if pr:
-                seed = pr.get("playoff_seed")
-                conf = pr.get("conference", "")
-                if seed == seed and seed is not None:
-                    seed_str = f"#{int(seed)} {conf}"
-            labels.append(team_full_name(a))
-            bar_colors.append(TEAM_COLORS.get(a, "#0f4fd8"))
-            text_labels.append(f" {p:.1%}  ·  {rec}  ·  {seed_str}" if rec else f" {p:.1%}")
+        # Track which team is selected
+        if "who_selected" not in st.session_state:
+            st.session_state.who_selected = None
 
-        fig = go.Figure(go.Bar(
-            x=probs,
-            y=labels,
-            orientation="h",
-            marker=dict(color=bar_colors, line=dict(width=0)),
-            text=text_labels,
-            textposition="outside",
-            textfont=dict(size=12),
-            hovertemplate="%{y}: %{x:.1f}%<extra></extra>",
-        ))
+        for rank, row in sorted_title.iterrows():
+            abbr = str(row["TEAM_ABBR"])
+            prob = float(row["title_prob"])
+            full_name = team_full_name(abbr)
+            badge = _title_badge(abbr, prob, rank + 1)
+            bar_pct = int(prob / max_prob * 100) if max_prob > 0 else 0
+            is_selected = st.session_state.who_selected == abbr
 
-        n_teams = len(abbrs)
-        fig.update_layout(
-            height=max(400, n_teams * 36),
-            margin=dict(l=10, r=80, t=10, b=10),
-            xaxis=dict(
-                title="Title Probability (%)",
-                showgrid=True,
-                gridcolor="rgba(0,0,0,0.06)",
-                zeroline=False,
-                range=[0, max(probs) * 1.45],
-            ),
-            yaxis=dict(
-                automargin=True,
-                tickfont=dict(size=12),
-            ),
-            plot_bgcolor="rgba(0,0,0,0)",
-            paper_bgcolor="rgba(0,0,0,0)",
-            bargap=0.25,
-            clickmode="event+select",
-        )
+            badge_color = {"★ Favorite": "#059669", "↑ Surprise": "#2563EB", "→ Contender": "#6B7280", "⚠ Longshot": "#9CA3AF"}.get(badge, "#9CA3AF")
+            bar_color = TEAM_COLORS.get(abbr, "#0f4fd8")
+            border_style = f"2px solid {bar_color}" if is_selected else "1px solid #e5e7eb"
+            bg = "rgba(240,245,255,0.95)" if is_selected else "rgba(255,255,255,0.8)"
 
-        event = st.plotly_chart(
-            fig,
-            use_container_width=True,
-            key="who_wins_chart",
-            on_select="rerun",
-        )
-
-        # Detect selected team from chart click
-        selected_abbr = None
-        if event and event.selection and event.selection.points:
-            point = event.selection.points[0]
-            idx = point.get("point_index", point.get("point_number"))
-            if idx is not None and 0 <= idx < len(abbrs):
-                selected_abbr = abbrs[idx]
-
-        # Detail panel for selected team
-        if selected_abbr:
-            sel_row = title_df[title_df["TEAM_ABBR"] == selected_abbr].iloc[0]
-            sel_name = team_full_name(selected_abbr)
-            sel_prob = float(sel_row["title_prob"])
-            pr = _preds_map.get(selected_abbr, {})
-            fr = _feats_map.get(selected_abbr, {})
-
-            rec = f"{int(pr['wins'])}-{int(pr['losses'])}" if pr else ""
-            seed_str = ""
-            if pr:
-                seed = pr.get("playoff_seed")
-                conf = pr.get("conference", "")
-                if seed == seed and seed is not None:
-                    seed_str = f"#{int(seed)} seed · {conf}"
-
-            st.markdown("---")
-            detail_l, detail_r = st.columns([1.2, 1])
-
-            with detail_l:
-                hdr_cols = st.columns([0.15, 0.85])
-                with hdr_cols[0]:
-                    st.image(logo_url(selected_abbr), width=56)
-                with hdr_cols[1]:
-                    st.markdown(f"### {sel_name}")
-                    st.caption(f"{rec} · {seed_str}" if seed_str else rec)
-
-                # Playoff path funnel
-                r2_p = float(sel_row.get("make_second_round_prob", 0))
-                cf_p = float(sel_row.get("make_conf_finals_prob", 0))
-                fin_p = float(sel_row.get("make_finals_prob", 0))
+            # Tile card — rendered as columns so the button is clickable
+            tile_cols = st.columns([0.07, 0.73, 0.12, 0.08])
+            with tile_cols[0]:
+                st.image(logo_url(abbr), width=32)
+            with tile_cols[1]:
                 st.markdown(
-                    f'<div style="display:flex;align-items:center;gap:0.3rem;flex-wrap:wrap;margin:0.5rem 0;">'
-                    f'<span style="background:#dbeafe;border-radius:6px;padding:4px 10px;font-weight:600;font-size:0.85rem;">2nd Rd {r2_p:.0%}</span>'
-                    f'<span style="color:#94a3b8;">→</span>'
-                    f'<span style="background:#c7d2fe;border-radius:6px;padding:4px 10px;font-weight:600;font-size:0.85rem;">Conf Finals {cf_p:.0%}</span>'
-                    f'<span style="color:#94a3b8;">→</span>'
-                    f'<span style="background:#a5b4fc;border-radius:6px;padding:4px 10px;font-weight:600;font-size:0.85rem;color:#312e81;">Finals {fin_p:.0%}</span>'
-                    f'<span style="color:#94a3b8;">→</span>'
-                    f'<span style="background:#6366f1;border-radius:6px;padding:4px 10px;font-weight:700;font-size:0.85rem;color:white;">Title {sel_prob:.0%}</span>'
+                    f'<div style="font-weight:700;font-size:0.95rem;line-height:1.2;">{full_name}</div>'
+                    f'<div style="background:#e5e7eb;border-radius:4px;height:6px;margin-top:4px;">'
+                    f'  <div style="background:{bar_color};border-radius:4px;height:6px;width:{bar_pct}%;"></div>'
                     f'</div>',
                     unsafe_allow_html=True,
                 )
+            with tile_cols[2]:
+                st.markdown(
+                    f'<div style="text-align:right;padding-top:2px;">'
+                    f'  <div style="font-weight:700;font-size:1.05rem;">{prob:.0%}</div>'
+                    f'  <div style="font-size:0.7rem;color:{badge_color};font-weight:600;">{badge}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+            with tile_cols[3]:
+                if st.button("▸" if not is_selected else "▾", key=f"who_{abbr}", use_container_width=True):
+                    st.session_state.who_selected = None if is_selected else abbr
+                    st.rerun()
 
-                # Key metrics
-                if fr:
-                    metric_parts = []
-                    nr = fr.get("rs_net_rating")
-                    if nr == nr and nr is not None:
-                        metric_parts.append(f"Net Rating **{float(nr):+.1f}**")
-                    efg = fr.get("rs_efg_pct")
-                    if efg == efg and efg is not None:
-                        metric_parts.append(f"eFG% **{float(efg):.1%}**")
-                    cg = fr.get("rs_close_game_win_pct")
-                    if cg == cg and cg is not None:
-                        metric_parts.append(f"Close games **{float(cg):.0%}**")
-                    vt = fr.get("rs_vs_top_teams_win_pct")
-                    if vt == vt and vt is not None:
-                        metric_parts.append(f"vs Top teams **{float(vt):.0%}**")
-                    if metric_parts:
-                        st.markdown(" · ".join(metric_parts))
+            # Inline detail panel — renders right below the selected tile
+            if is_selected:
+                sel_row = row
+                pr = _preds_map.get(abbr, {})
+                fr = _feats_map.get(abbr, {})
 
-            with detail_r:
-                st.markdown("**Key Players**")
-                impact_rows = _impact_map.get(selected_abbr)
-                if impact_rows is not None and not impact_rows.empty:
-                    for _, p in impact_rows.iterrows():
-                        delta_html = ""
-                        if not pd.isna(p.get("net_rating_delta")):
-                            d = float(p["net_rating_delta"])
-                            color = "#059669" if d > 0 else "#DC2626"
-                            delta_html = f' <span style="color:{color};font-weight:600;">{d:+.1f} net</span>'
-                        st.markdown(
-                            f"**{p['PLAYER_NAME']}** — {p['ppg']:.1f}pts / {p['rpg']:.1f}reb / {p['apg']:.1f}ast{delta_html}",
-                            unsafe_allow_html=True,
-                        )
-                else:
-                    # Fallback to player_rs_df top players
-                    if not player_rs_df.empty:
-                        tp = player_rs_df[player_rs_df["TEAM_ABBR"] == selected_abbr]
-                        if not tp.empty:
-                            recent = tp.sort_values("GAME_DATE").groupby("PLAYER_NAME").tail(10)
-                            avgs = recent.groupby("PLAYER_NAME").agg(ppg=("PTS", "mean"), rpg=("REB", "mean"), apg=("AST", "mean"), gp=("PTS", "count")).reset_index()
-                            avgs = avgs[avgs["gp"] >= 5].sort_values("ppg", ascending=False).head(3)
-                            for _, p in avgs.iterrows():
-                                st.markdown(f"**{p['PLAYER_NAME']}** — {p['ppg']:.1f}pts / {p['rpg']:.1f}reb / {p['apg']:.1f}ast")
-        else:
-            st.caption("Click a bar above to see team details.")
+                rec = f"{int(pr['wins'])}-{int(pr['losses'])}" if pr else ""
+                seed_str = ""
+                if pr:
+                    seed = pr.get("playoff_seed")
+                    conf = pr.get("conference", "")
+                    if seed == seed and seed is not None:
+                        seed_str = f"#{int(seed)} seed · {conf}"
+
+                detail_l, detail_r = st.columns([1.2, 1])
+                with detail_l:
+                    st.caption(f"{rec} · {seed_str}" if seed_str else rec)
+
+                    # Playoff path funnel
+                    r2_p = float(sel_row.get("make_second_round_prob", 0))
+                    cf_p = float(sel_row.get("make_conf_finals_prob", 0))
+                    fin_p = float(sel_row.get("make_finals_prob", 0))
+                    st.markdown(
+                        f'<div style="display:flex;align-items:center;gap:0.3rem;flex-wrap:wrap;margin:0.3rem 0 0.5rem 0;">'
+                        f'<span style="background:#dbeafe;border-radius:6px;padding:3px 8px;font-weight:600;font-size:0.8rem;">2nd Rd {r2_p:.0%}</span>'
+                        f'<span style="color:#94a3b8;">→</span>'
+                        f'<span style="background:#c7d2fe;border-radius:6px;padding:3px 8px;font-weight:600;font-size:0.8rem;">Conf Finals {cf_p:.0%}</span>'
+                        f'<span style="color:#94a3b8;">→</span>'
+                        f'<span style="background:#a5b4fc;border-radius:6px;padding:3px 8px;font-weight:600;font-size:0.8rem;color:#312e81;">Finals {fin_p:.0%}</span>'
+                        f'<span style="color:#94a3b8;">→</span>'
+                        f'<span style="background:#6366f1;border-radius:6px;padding:3px 8px;font-weight:700;font-size:0.8rem;color:white;">Title {prob:.0%}</span>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+
+                    if fr:
+                        metric_parts = []
+                        nr = fr.get("rs_net_rating")
+                        if nr == nr and nr is not None:
+                            metric_parts.append(f"Net Rating **{float(nr):+.1f}**")
+                        efg = fr.get("rs_efg_pct")
+                        if efg == efg and efg is not None:
+                            metric_parts.append(f"eFG% **{float(efg):.1%}**")
+                        cg = fr.get("rs_close_game_win_pct")
+                        if cg == cg and cg is not None:
+                            metric_parts.append(f"Close games **{float(cg):.0%}**")
+                        vt = fr.get("rs_vs_top_teams_win_pct")
+                        if vt == vt and vt is not None:
+                            metric_parts.append(f"vs Top teams **{float(vt):.0%}**")
+                        if metric_parts:
+                            st.markdown(" · ".join(metric_parts))
+
+                with detail_r:
+                    st.markdown("**Key Players**")
+                    impact_rows = _impact_map.get(abbr)
+                    if impact_rows is not None and not impact_rows.empty:
+                        for _, p in impact_rows.iterrows():
+                            delta_html = ""
+                            if not pd.isna(p.get("net_rating_delta")):
+                                d = float(p["net_rating_delta"])
+                                color = "#059669" if d > 0 else "#DC2626"
+                                delta_html = f' <span style="color:{color};font-weight:600;">{d:+.1f} net</span>'
+                            st.markdown(
+                                f"**{p['PLAYER_NAME']}** — {p['ppg']:.1f}pts / {p['rpg']:.1f}reb / {p['apg']:.1f}ast{delta_html}",
+                                unsafe_allow_html=True,
+                            )
+                    else:
+                        if not player_rs_df.empty:
+                            tp = player_rs_df[player_rs_df["TEAM_ABBR"] == abbr]
+                            if not tp.empty:
+                                recent = tp.sort_values("GAME_DATE").groupby("PLAYER_NAME").tail(10)
+                                avgs = recent.groupby("PLAYER_NAME").agg(ppg=("PTS", "mean"), rpg=("REB", "mean"), apg=("AST", "mean"), gp=("PTS", "count")).reset_index()
+                                avgs = avgs[avgs["gp"] >= 5].sort_values("ppg", ascending=False).head(3)
+                                for _, p in avgs.iterrows():
+                                    st.markdown(f"**{p['PLAYER_NAME']}** — {p['ppg']:.1f}pts / {p['rpg']:.1f}reb / {p['apg']:.1f}ast")
+
+                st.markdown("---")
 
     st.markdown("<br>", unsafe_allow_html=True)
     with st.expander("🔬 Show model details & methodology"):
