@@ -257,6 +257,13 @@ def load_base_tables() -> dict[str, pd.DataFrame]:
             WHERE SEASON = '{CURRENT_SEASON_STR}'
             ORDER BY TEAM_ABBR, GAME_DATE
         """,
+        "player_impact": f"""
+            SELECT TEAM_ABBR, PLAYER_NAME, games_played, games_missed,
+                   team_win_pct_with, team_win_pct_without, team_net_with, team_net_without,
+                   win_pct_delta, net_rating_delta, mpg, ppg, rpg, apg
+            FROM player_impact
+            WHERE SEASON = '{CURRENT_SEASON_STR}'
+        """,
     }
 
     try:
@@ -277,6 +284,7 @@ def load_base_tables() -> dict[str, pd.DataFrame]:
             "remaining_games": "team_remaining_games",
             "projected_records": "team_projected_record",
             "daily_model_scores": "daily_model_scores",
+            "player_impact": "player_impact",
         }
         for key, sql in queries.items():
             out[key] = con.execute(sql).df() if mapping[key] in tables else pd.DataFrame()
@@ -1167,6 +1175,7 @@ features_df = tables.get("features", pd.DataFrame())
 remaining_games_df = tables.get("remaining_games", pd.DataFrame())
 projected_records_df = tables.get("projected_records", pd.DataFrame())
 daily_model_scores_df = tables.get("daily_model_scores", pd.DataFrame())
+player_impact_df = tables.get("player_impact", pd.DataFrame())
 
 # ── Preseason Vegas odds (BBRef, vig-removed) — used for badge logic in Tab 1 ──
 _PRESEASON_PROBS: dict[str, float] = {
@@ -1320,6 +1329,21 @@ def build_analyst_context() -> str:
             )
         lines.append("")
 
+    # Player impact — top impact players league-wide for context
+    if not player_impact_df.empty:
+        splits = player_impact_df.dropna(subset=["net_rating_delta"]).copy()
+        if not splits.empty:
+            lines.append("KEY PLAYER IMPACT (with/without splits — top 15 by net rating delta):")
+            top = splits.sort_values("net_rating_delta", ascending=False).head(15)
+            for _, r in top.iterrows():
+                lines.append(
+                    f"  {r['TEAM_ABBR']} {r['PLAYER_NAME']}: "
+                    f"net {r['net_rating_delta']:+.1f} (with {r['team_net_with']:+.1f}, without {r['team_net_without']:+.1f}) | "
+                    f"win% {r['win_pct_delta']:+.0%} | "
+                    f"{r['ppg']:.1f}ppg, played {int(r['games_played'])} missed {int(r['games_missed'])}"
+                )
+            lines.append("")
+
     return "\n".join(lines)
 
 
@@ -1409,6 +1433,29 @@ def build_team_context(team_abbr: str) -> dict:
                 f"vs {r['OPP_ABBR']} ({'Home' if r['IS_HOME'] else 'Away'}) {float(r['GAME_WIN_PROB']):.0%} win"
                 for _, r in team_sched.iterrows()
             ]
+
+    if not player_impact_df.empty:
+        team_impact = player_impact_df[player_impact_df["TEAM_ABBR"] == team_abbr].copy()
+        if not team_impact.empty:
+            # Players with meaningful splits (3+ missed games), sorted by impact
+            with_splits = team_impact.dropna(subset=["net_rating_delta"]).sort_values("net_rating_delta", ascending=False)
+            stats["player_impact"] = []
+            for _, r in with_splits.iterrows():
+                stats["player_impact"].append(
+                    f"{r['PLAYER_NAME']}: {r['ppg']:.1f}ppg {r['mpg']:.1f}mpg | "
+                    f"played {int(r['games_played'])} missed {int(r['games_missed'])} | "
+                    f"team net WITH {r['team_net_with']:+.1f} WITHOUT {r['team_net_without']:+.1f} "
+                    f"(delta {r['net_rating_delta']:+.1f}) | "
+                    f"win% WITH {r['team_win_pct_with']:.0%} WITHOUT {r['team_win_pct_without']:.0%} "
+                    f"(delta {r['win_pct_delta']:+.0%})"
+                )
+            # Also include players without splits (haven't missed enough games)
+            no_splits = team_impact[team_impact["net_rating_delta"].isna()]
+            for _, r in no_splits.sort_values("ppg", ascending=False).iterrows():
+                stats["player_impact"].append(
+                    f"{r['PLAYER_NAME']}: {r['ppg']:.1f}ppg {r['mpg']:.1f}mpg | "
+                    f"played {int(r['games_played'])} missed {int(r['games_missed'])} (insufficient missed games for split)"
+                )
 
     return stats
 

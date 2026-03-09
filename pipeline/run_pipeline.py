@@ -23,6 +23,7 @@ from typing import Callable
 from pipeline.features.availability import compute_availability_features
 from pipeline.features.build_features import build_model_features
 from pipeline.features.physicality import compute_physicality_features
+from pipeline.features.player_impact import compute_player_impact
 from pipeline.features.team_stats import compute_team_stats_features
 from pipeline.ingestion.fetch_games import fetch_all_seasons
 from pipeline.ingestion.fetch_players import fetch_all_player_logs
@@ -122,6 +123,7 @@ def main() -> None:
         _run_stage(Stage("Predict current season field", predict_current_season))
         _run_stage(Stage("Run Monte Carlo simulation", run_simulation))
         _run_stage(Stage("Compute daily historical model scores", compute_daily_model_scores))
+        _run_stage(Stage("Compute player impact splits", compute_player_impact))
 
     if args.with_remaining_schedule:
         from pipeline.models.remaining_schedule import build_remaining_schedule

@@ -28,6 +28,7 @@ Data available to you each turn:
 - Play-in tournament odds: probability of earning Seed 7, Seed 8, or making the playoffs at all
 - Top player stats: recent per-game averages (PPG/RPG/APG) for each team's rotation
 - Upcoming schedule: next games with projected win probabilities
+- Player impact data: with/without splits showing how the team performs when each key player is in vs out (net rating delta, win% delta, games missed)
 
 When answering:
 - Lead with the key insight, not the math
@@ -36,6 +37,8 @@ When answering:
 - Be confident but acknowledge uncertainty where the model is close
 - Keep responses concise — 3-5 sentences for quick questions, longer for full scouting reports
 - For scouting reports: cover playoff identity, key strengths/weaknesses, likely first-round matchup, and title ceiling
+- When asked about player injuries or absences, use the with/without splits to quantify impact (e.g., "Without X, the team's net rating drops by Y points")
+- For "what if X is out" questions, reference the actual with/without data rather than speculating
 
 Always ground your answers in the actual numbers provided. Do not invent statistics.
 """
@@ -122,6 +125,11 @@ def get_team_scouting_report(
 
     if team_stats.get("next_games"):
         lines.append("Next Games: " + " | ".join(team_stats["next_games"]))
+
+    if team_stats.get("player_impact"):
+        lines.append("\nPLAYER IMPACT (with/without splits — team net rating & win% when player is in vs out):")
+        for p in team_stats["player_impact"]:
+            lines.append(f"  {p}")
 
     lines.append(
         "\nGenerate a concise playoff scouting report. Cover: "
