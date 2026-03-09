@@ -178,23 +178,20 @@ jobs:
           api = HfApi(token=os.environ["HF_TOKEN"])
           repo_id = os.environ["HF_REPO_ID"]
 
-          # Push slim app database (what Streamlit reads)
-          api.upload_file(
-              path_or_fileobj="data/processed/nba_app.duckdb",
-              path_in_repo="data/processed/nba_app.duckdb",
-              repo_id=repo_id,
-              repo_type="space",
-              commit_message="chore: nightly pipeline — updated DB",
-          )
-
-          # Push model artifacts (CSV, JSON, MD — skip binary pkl/joblib)
+          # Push entire repo (code + data + model artifacts) to HF Spaces
           api.upload_folder(
-              folder_path="models/trained",
-              path_in_repo="models/trained",
+              folder_path=".",
               repo_id=repo_id,
               repo_type="space",
-              commit_message="chore: nightly pipeline — updated model artifacts",
-              ignore_patterns=["*.pkl", "*.joblib"],
+              commit_message="chore: nightly pipeline — sync code + artifacts",
+              ignore_patterns=[
+                  ".git/**",
+                  "data/processed/nba.duckdb",   # full DB too large; app uses nba_app.duckdb
+                  "models/trained/*.pkl",
+                  "models/trained/*.joblib",
+                  "__pycache__/**",
+                  "*.pyc",
+              ],
           )
 
           print(f"Pushed to https://huggingface.co/spaces/{repo_id}")
