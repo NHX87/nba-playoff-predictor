@@ -1610,10 +1610,17 @@ with tab_who:
             border_style = f"2px solid {bar_color}" if is_selected else "1px solid #e5e7eb"
             bg = "rgba(240,245,255,0.95)" if is_selected else "rgba(255,255,255,0.8)"
 
-            # Tile card — rendered as columns so the button is clickable
-            tile_cols = st.columns([0.07, 0.73, 0.12, 0.08])
+            # Tile card — clicking logo toggles detail panel
+            tile_cols = st.columns([0.06, 0.79, 0.15])
             with tile_cols[0]:
-                st.image(logo_url(abbr), width=32)
+                clicked = st.button(
+                    abbr, key=f"who_{abbr}", type="tertiary",
+                    help=f"Click for {full_name} details",
+                    use_container_width=True,
+                )
+                if clicked:
+                    st.session_state.who_selected = None if is_selected else abbr
+                    st.rerun()
             with tile_cols[1]:
                 st.markdown(
                     f'<div style="font-weight:700;font-size:0.95rem;line-height:1.2;">{full_name}</div>'
@@ -1630,10 +1637,6 @@ with tab_who:
                     f'</div>',
                     unsafe_allow_html=True,
                 )
-            with tile_cols[3]:
-                if st.button("▸" if not is_selected else "▾", key=f"who_{abbr}", use_container_width=True):
-                    st.session_state.who_selected = None if is_selected else abbr
-                    st.rerun()
 
             # Inline detail panel — renders right below the selected tile
             if is_selected:
