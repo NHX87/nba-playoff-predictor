@@ -1151,6 +1151,12 @@ def add_theme() -> None:
             .meta-chip { font-size: 0.72rem !important; padding: 0.15rem 0.35rem !important; }
         }
 
+        /* Bigger logos inside tertiary button labels */
+        button[kind="tertiary"] img {
+            max-height: 2.4rem !important;
+            width: auto !important;
+        }
+
         .stTabs [data-baseweb="tab-list"] {
             gap: 1.15rem;
             border-bottom: 1px solid var(--line);
@@ -1611,7 +1617,7 @@ with tab_who:
             bg = "rgba(240,245,255,0.95)" if is_selected else "rgba(255,255,255,0.8)"
 
             # Tile card — clicking logo toggles detail panel
-            tile_cols = st.columns([0.06, 0.79, 0.15])
+            tile_cols = st.columns([0.08, 0.77, 0.15])
             with tile_cols[0]:
                 if st.button(
                     f"![{abbr}]({logo_url(abbr)})",
