@@ -1573,13 +1573,25 @@ with tab_who:
 
     # Championship odds leaderboard
     st.markdown("<div class='section-label'>Championship Odds — All Playoff Contenders</div>", unsafe_allow_html=True)
-    st.caption("Based on 10,000 simulated playoff brackets. Hover over team names to see their city.")
+    st.caption("Based on 10,000 simulated playoff brackets. Click any team to see quick facts.")
 
     if title_df.empty:
         st.info("Run the simulation pipeline to generate championship odds.")
     else:
         sorted_title = title_df.sort_values("title_prob", ascending=False).reset_index(drop=True)
         max_prob = float(sorted_title["title_prob"].iloc[0])
+
+        # Pre-build quick-fact lookups
+        _preds_map = {}
+        if not current_preds_df.empty:
+            _preds_map = current_preds_df.set_index("TEAM_ABBR").to_dict("index")
+        _feats_map = {}
+        if not features_df.empty:
+            _feats_map = features_df.set_index("TEAM_ABBR").to_dict("index")
+        _impact_map = {}
+        if not player_impact_df.empty:
+            for team, grp in player_impact_df.groupby("TEAM_ABBR"):
+                _impact_map[team] = grp.sort_values("ppg", ascending=False).head(3)
 
         for rank, row in sorted_title.iterrows():
             abbr = str(row["TEAM_ABBR"])
@@ -1591,12 +1603,38 @@ with tab_who:
             badge_color = {"★ Favorite": "#059669", "↑ Surprise": "#2563EB", "→ Contender": "#6B7280", "⚠ Longshot": "#9CA3AF"}.get(badge, "#9CA3AF")
             bar_color = {"★ Favorite": "#059669", "↑ Surprise": "#2563EB", "→ Contender": "#0f4fd8", "⚠ Longshot": "#d1d5db"}.get(badge, "#0f4fd8")
 
+            # Build quick-fact chips
+            facts: list[str] = []
+            pr = _preds_map.get(abbr, {})
+            if pr:
+                w, l = int(pr.get("wins", 0)), int(pr.get("losses", 0))
+                facts.append(f"{w}-{l}")
+                seed = pr.get("playoff_seed")
+                conf = pr.get("conference", "")
+                if seed == seed and seed is not None:  # not NaN
+                    facts.append(f"#{int(seed)} {conf}")
+            fr = _feats_map.get(abbr, {})
+            if fr:
+                nr = fr.get("rs_net_rating")
+                if nr == nr and nr is not None:
+                    facts.append(f"Net {float(nr):+.1f}")
+
+            fact_html = ""
+            if facts:
+                chips = "".join(
+                    f'<span style="background:#f1f5f9;border-radius:4px;padding:1px 6px;font-size:0.75rem;color:#475569;">{f}</span>'
+                    for f in facts
+                )
+                fact_html = f'<div style="display:flex;gap:0.35rem;margin-top:2px;">{chips}</div>'
+
+            # Card HTML
             st.markdown(
                 f'<div style="display:flex;align-items:center;gap:0.75rem;padding:0.55rem 0.75rem;'
                 f'border:1px solid #e5e7eb;border-radius:10px;margin-bottom:0.4rem;background:rgba(255,255,255,0.8);">'
-                f'<img src="{logo_url(abbr)}" width="32" height="32" style="border-radius:50%;flex-shrink:0;" />'
+                f'<img src="{logo_url(abbr)}" width="36" height="36" style="border-radius:50%;flex-shrink:0;" />'
                 f'<div style="flex:1;min-width:0;">'
                 f'  <div style="font-weight:700;font-size:0.97rem;">{full_name}</div>'
+                f'  {fact_html}'
                 f'  <div style="background:#e5e7eb;border-radius:4px;height:6px;margin-top:4px;">'
                 f'    <div style="background:{bar_color};border-radius:4px;height:6px;width:{bar_pct}%;"></div>'
                 f'  </div>'
@@ -1608,6 +1646,48 @@ with tab_who:
                 f'</div>',
                 unsafe_allow_html=True,
             )
+
+            # Expandable detail panel
+            with st.expander(f"More on {full_name}", expanded=False):
+                detail_cols = st.columns([1, 1])
+                with detail_cols[0]:
+                    # Round-by-round probabilities
+                    finals_p = float(row.get("make_finals_prob", 0))
+                    conf_p = float(row.get("make_conf_finals_prob", 0))
+                    r2_p = float(row.get("make_second_round_prob", 0))
+                    st.markdown(
+                        f"**Playoff path odds**<br>"
+                        f"2nd Round: {r2_p:.0%} &nbsp;→&nbsp; Conf Finals: {conf_p:.0%} &nbsp;→&nbsp; "
+                        f"Finals: {finals_p:.0%} &nbsp;→&nbsp; Title: {prob:.0%}",
+                        unsafe_allow_html=True,
+                    )
+                    if fr:
+                        efg = fr.get("rs_efg_pct")
+                        cg = fr.get("rs_close_game_win_pct")
+                        vt = fr.get("rs_vs_top_teams_win_pct")
+                        fta = fr.get("rs_fta")
+                        metric_parts = []
+                        if efg == efg and efg is not None:
+                            metric_parts.append(f"eFG% {float(efg):.1%}")
+                        if cg == cg and cg is not None:
+                            metric_parts.append(f"Close games {float(cg):.0%}")
+                        if vt == vt and vt is not None:
+                            metric_parts.append(f"vs Top teams {float(vt):.0%}")
+                        if fta == fta and fta is not None:
+                            metric_parts.append(f"FTA/g {float(fta):.1f}")
+                        if metric_parts:
+                            st.caption(" · ".join(metric_parts))
+                with detail_cols[1]:
+                    # Top players with impact
+                    impact_rows = _impact_map.get(abbr)
+                    if impact_rows is not None and not impact_rows.empty:
+                        st.markdown("**Key players**")
+                        for _, p in impact_rows.iterrows():
+                            delta_str = ""
+                            if not pd.isna(p.get("net_rating_delta")):
+                                d = float(p["net_rating_delta"])
+                                delta_str = f' · impact {d:+.1f} net'
+                            st.caption(f"{p['PLAYER_NAME']}: {p['ppg']:.1f}ppg / {p['rpg']:.1f}rpg / {p['apg']:.1f}apg{delta_str}")
 
     st.markdown("<br>", unsafe_allow_html=True)
     with st.expander("🔬 Show model details & methodology"):
