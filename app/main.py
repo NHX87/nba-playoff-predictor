@@ -176,6 +176,32 @@ TEAM_COLORS = {
 
 
 @st.cache_data(ttl=300)
+def fetch_live_standings() -> pd.DataFrame:
+    """Fetch current W/L from stats.nba.com (cached 5 min). Returns empty df on failure."""
+    try:
+        from nba_api.stats.endpoints import leaguestandingsv3
+        raw = leaguestandingsv3.LeagueStandingsV3(
+            season=CURRENT_SEASON_STR, timeout=30
+        ).get_data_frames()[0]
+        df = raw[["TeamSlug", "Conference", "WINS", "LOSSES", "WinPCT", "Record"]].copy()
+        # Map TeamSlug to TEAM_ABBR via a quick lookup
+        slug_to_abbr = {
+            "hawks": "ATL", "celtics": "BOS", "nets": "BKN", "hornets": "CHA", "bulls": "CHI",
+            "cavaliers": "CLE", "mavericks": "DAL", "nuggets": "DEN", "pistons": "DET", "warriors": "GSW",
+            "rockets": "HOU", "pacers": "IND", "clippers": "LAC", "lakers": "LAL", "grizzlies": "MEM",
+            "heat": "MIA", "bucks": "MIL", "timberwolves": "MIN", "pelicans": "NOP", "knicks": "NYK",
+            "thunder": "OKC", "magic": "ORL", "76ers": "PHI", "suns": "PHX", "trail-blazers": "POR",
+            "kings": "SAC", "spurs": "SAS", "raptors": "TOR", "jazz": "UTA", "wizards": "WAS",
+        }
+        df["TEAM_ABBR"] = df["TeamSlug"].map(slug_to_abbr)
+        df = df.rename(columns={"WINS": "wins", "LOSSES": "losses", "WinPCT": "win_pct", "Conference": "conference"})
+        df["conference"] = df["conference"].str.title()
+        return df[["TEAM_ABBR", "conference", "wins", "losses", "win_pct", "Record"]].dropna(subset=["TEAM_ABBR"])
+    except Exception:
+        return pd.DataFrame()
+
+
+@st.cache_data(ttl=300)
 def load_base_tables() -> dict[str, pd.DataFrame]:
     """Load required app and modeling tables from DuckDB."""
     out: dict[str, pd.DataFrame] = {}
@@ -1176,6 +1202,21 @@ remaining_games_df = tables.get("remaining_games", pd.DataFrame())
 projected_records_df = tables.get("projected_records", pd.DataFrame())
 daily_model_scores_df = tables.get("daily_model_scores", pd.DataFrame())
 player_impact_df = tables.get("player_impact", pd.DataFrame())
+
+# Overlay live standings on current_preds_df so records stay up to date between pipeline runs
+live_standings = fetch_live_standings()
+if not live_standings.empty and not current_preds_df.empty:
+    live_map = live_standings.set_index("TEAM_ABBR")[["wins", "losses", "win_pct", "Record"]].to_dict("index")
+    for col in ["wins", "losses", "win_pct"]:
+        current_preds_df[col] = current_preds_df["TEAM_ABBR"].map(lambda a, c=col: live_map.get(a, {}).get(c, None)).fillna(current_preds_df[col])
+    if not title_df.empty and "Record" in title_df.columns:
+        title_df["Record"] = title_df["TEAM_ABBR"].map(lambda a: live_map.get(a, {}).get("Record")).fillna(title_df["Record"])
+    if not projected_records_df.empty:
+        for col in ["current_wins", "current_losses"]:
+            src_col = "wins" if "wins" in col else "losses"
+            projected_records_df[col] = projected_records_df["TEAM_ABBR"].map(
+                lambda a, c=src_col: live_map.get(a, {}).get(c, None)
+            ).fillna(projected_records_df[col])
 
 # ── Preseason Vegas odds (BBRef, vig-removed) — used for badge logic in Tab 1 ──
 _PRESEASON_PROBS: dict[str, float] = {
