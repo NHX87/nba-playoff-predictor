@@ -2,7 +2,7 @@ name: Nightly Pipeline
 
 on:
   schedule:
-    - cron: '0 2 * * *'   # 2 AM UTC daily
+    - cron: '0 6 * * *'   # '6 AM UTC daily
   workflow_dispatch:        # manual trigger from GitHub UI
 
 env:
