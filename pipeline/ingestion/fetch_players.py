@@ -162,7 +162,7 @@ def fetch_all_player_logs():
 
     # Load regular season player logs
     if reg_dfs:
-        reg_combined = pd.concat(reg_dfs, ignore_index=True)
+        reg_combined = pd.concat([df for df in reg_dfs if not df.empty], ignore_index=True)
         con.execute("DROP TABLE IF EXISTS raw_player_logs_rs")
         con.execute("CREATE TABLE raw_player_logs_rs AS SELECT * FROM reg_combined")
         print(f"\nLoaded {len(reg_combined):,} rows → raw_player_logs_rs")
@@ -175,7 +175,7 @@ def fetch_all_player_logs():
 
     # Load playoff player logs
     if po_dfs:
-        po_combined = pd.concat(po_dfs, ignore_index=True)
+        po_combined = pd.concat([df for df in po_dfs if not df.empty], ignore_index=True)
         con.execute("DROP TABLE IF EXISTS raw_player_logs_po")
         con.execute("CREATE TABLE raw_player_logs_po AS SELECT * FROM po_combined")
         print(f"Loaded {len(po_combined):,} rows → raw_player_logs_po")

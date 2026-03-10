@@ -150,7 +150,16 @@ def main() -> None:
             _run_stage(Stage("Run Monte Carlo simulation", run_simulation))
 
         _run_stage(Stage("Compute daily historical model scores", compute_daily_model_scores))
-        _run_stage(Stage("Compute player impact splits", compute_player_impact))
+
+        def _run_player_impact() -> None:
+            import duckdb
+            con = duckdb.connect(DB_PATH)
+            try:
+                compute_player_impact(con)
+            finally:
+                con.close()
+
+        _run_stage(Stage("Compute player impact splits", _run_player_impact))
 
     if args.with_remaining_schedule:
         from pipeline.models.remaining_schedule import build_remaining_schedule
