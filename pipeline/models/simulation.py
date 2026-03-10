@@ -343,6 +343,198 @@ def write_outputs(
         con.close()
 
 
+def build_locked_results_from_live(live_bracket: pd.DataFrame) -> dict[str, str]:
+    """
+    Convert completed series from a live bracket DataFrame into locked_results.
+
+    Returns dict mapping series key (e.g. "East_R1_1v8") to winner abbreviation.
+    """
+    locked: dict[str, str] = {}
+    if live_bracket.empty:
+        return locked
+
+    for _, row in live_bracket.iterrows():
+        if row["series_status"] != "completed" or not row.get("actual_winner"):
+            continue
+        conf = row["conference"]
+        rnd = row["round_num"]
+        h = row["high_seed"]
+        l = row["low_seed"]
+        key = f"{conf}_R{rnd}_{h}v{l}"
+        locked[key] = row["actual_winner"]
+
+    return locked
+
+
+def _make_series_key(conf: str, round_num: int, high_seed: int, low_seed: int) -> str:
+    return f"{conf}_R{round_num}_{high_seed}v{low_seed}"
+
+
+def run_conditional_monte_carlo(
+    locked_results: dict[str, str] | None = None,
+    live_bracket: pd.DataFrame | None = None,
+    n_simulations: int = MONTE_CARLO_RUNS,
+    rng_seed: int = RNG_SEED,
+) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any], pd.DataFrame, pd.DataFrame]:
+    """
+    Run Monte Carlo simulation with locked (actual) series results.
+
+    For completed series, the actual winner is used with P=1.0.
+    For in-progress or future series, the model probability is used.
+
+    Parameters
+    ----------
+    locked_results : dict mapping series_key -> winner_abbr for completed series
+    live_bracket : DataFrame from fetch_playoff_status (used for actual matchups)
+    """
+    if locked_results is None:
+        locked_results = {}
+
+    field_df, feature_df, playin_df = _load_current_inputs()
+    artifact = load_matchup_artifact()
+
+    seed_maps = _build_seed_maps(field_df)
+    teams = sorted(field_df["TEAM_ABBR"].tolist())
+
+    # If we have a live bracket with actual teams not in our projected field,
+    # add them to the probability map
+    all_teams = set(teams)
+    if live_bracket is not None and not live_bracket.empty:
+        for col in ["high_team", "low_team", "actual_winner"]:
+            for t in live_bracket[col].dropna().unique():
+                all_teams.add(str(t))
+
+    pair_probs = _build_pair_prob_map(sorted(all_teams), feature_df, artifact)
+
+    # Build deterministic predictions that respect locked results
+    deterministic_series = _deterministic_series_predictions(seed_maps, pair_probs)
+    deterministic_series = add_series_length_cols(deterministic_series)
+
+    make_second_round = Counter()
+    make_conf_finals = Counter()
+    make_finals = Counter()
+    win_title = Counter()
+
+    rng = np.random.default_rng(rng_seed)
+
+    for _ in range(n_simulations):
+        conf_winners = {}
+
+        for conf in ["East", "West"]:
+            s = seed_maps[conf]
+
+            r1_winners = {}
+            for high, low in PAIRINGS:
+                t_high = s[high]
+                t_low = s[low]
+                key = _make_series_key(conf, 1, high, low)
+
+                if key in locked_results:
+                    winner = locked_results[key]
+                else:
+                    p_high = pair_probs.get((t_high, t_low), 0.5)
+                    winner = _winner_from_prob(t_high, t_low, p_high, rng)
+
+                r1_winners[(high, low)] = winner
+                make_second_round[winner] += 1
+
+            sf1_a, sf1_b = r1_winners[(1, 8)], r1_winners[(4, 5)]
+            sf2_a, sf2_b = r1_winners[(2, 7)], r1_winners[(3, 6)]
+
+            # Semifinal 1
+            key_sf1 = _make_series_key(conf, 2, 0, 0)
+            # For R2+, locked_results keys use actual team seeds or 0
+            # Try to find a locked result matching these teams
+            sf1_locked = None
+            sf2_locked = None
+            for lk, lv in locked_results.items():
+                if lk.startswith(f"{conf}_R2_") and lv in (sf1_a, sf1_b):
+                    sf1_locked = lv
+                if lk.startswith(f"{conf}_R2_") and lv in (sf2_a, sf2_b):
+                    sf2_locked = lv
+
+            if sf1_locked:
+                cf_a = sf1_locked
+            else:
+                p_sf1 = pair_probs.get((sf1_a, sf1_b), 0.5)
+                cf_a = _winner_from_prob(sf1_a, sf1_b, p_sf1, rng)
+
+            if sf2_locked:
+                cf_b = sf2_locked
+            else:
+                p_sf2 = pair_probs.get((sf2_a, sf2_b), 0.5)
+                cf_b = _winner_from_prob(sf2_a, sf2_b, p_sf2, rng)
+
+            make_conf_finals[cf_a] += 1
+            make_conf_finals[cf_b] += 1
+
+            # Conference Finals
+            cf_locked = None
+            for lk, lv in locked_results.items():
+                if lk.startswith(f"{conf}_R3_") and lv in (cf_a, cf_b):
+                    cf_locked = lv
+
+            if cf_locked:
+                conf_champ = cf_locked
+            else:
+                p_cf = pair_probs.get((cf_a, cf_b), 0.5)
+                conf_champ = _winner_from_prob(cf_a, cf_b, p_cf, rng)
+
+            make_finals[conf_champ] += 1
+            conf_winners[conf] = conf_champ
+
+        east = conf_winners["East"]
+        west = conf_winners["West"]
+
+        # Finals
+        finals_locked = None
+        for lk, lv in locked_results.items():
+            if lk.startswith("NBA_R4_") and lv in (east, west):
+                finals_locked = lv
+
+        if finals_locked:
+            champ = finals_locked
+        else:
+            p_finals = pair_probs.get((east, west), 0.5)
+            champ = _winner_from_prob(east, west, p_finals, rng)
+
+        win_title[champ] += 1
+
+    odds_rows = []
+    for r in field_df.itertuples(index=False):
+        team = r.TEAM_ABBR
+        odds_rows.append(
+            {
+                "season": CURRENT_SEASON_STR,
+                "conference": r.conference,
+                "playoff_seed": int(r.playoff_seed),
+                "TEAM_ABBR": team,
+                "Record": r.Record,
+                "seed_assignment_prob": float(r.seed_assignment_prob),
+                "make_second_round_prob": make_second_round[team] / n_simulations,
+                "make_conf_finals_prob": make_conf_finals[team] / n_simulations,
+                "make_finals_prob": make_finals[team] / n_simulations,
+                "title_prob": win_title[team] / n_simulations,
+            }
+        )
+
+    odds_df = pd.DataFrame(odds_rows).sort_values(
+        ["title_prob", "make_finals_prob"], ascending=[False, False]
+    ).reset_index(drop=True)
+
+    meta = {
+        "season": CURRENT_SEASON_STR,
+        "n_simulations": int(n_simulations),
+        "rng_seed": int(rng_seed),
+        "source": "conditional_monte_carlo",
+        "locked_series": len(locked_results),
+        "matchup_model_path": str(Path("models/trained/matchup_model.joblib")),
+        "projected_field_rows": int(len(field_df)),
+    }
+
+    return deterministic_series, odds_df, meta, field_df, playin_df
+
+
 def main() -> None:
     deterministic_series, odds_df, meta, field_df, playin_df = run_monte_carlo()
     write_outputs(deterministic_series, odds_df, meta, field_df, playin_df)

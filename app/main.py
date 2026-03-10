@@ -10,7 +10,7 @@ import math
 import sys
 from html import escape
 from pathlib import Path
-from textwrap import dedent
+
 
 import duckdb
 import numpy as np
@@ -290,6 +290,14 @@ def load_base_tables() -> dict[str, pd.DataFrame]:
             FROM player_impact
             WHERE SEASON = '{CURRENT_SEASON_STR}'
         """,
+        "live_bracket": """
+            SELECT series_id, conference, round, round_num,
+                   high_team, low_team, high_seed, low_seed,
+                   high_team_wins, low_team_wins, total_games,
+                   series_status, actual_winner
+            FROM playoff_bracket_live
+            ORDER BY round_num, conference, high_seed
+        """,
     }
 
     try:
@@ -311,6 +319,7 @@ def load_base_tables() -> dict[str, pd.DataFrame]:
             "projected_records": "team_projected_record",
             "daily_model_scores": "daily_model_scores",
             "player_impact": "player_impact",
+            "live_bracket": "playoff_bracket_live",
         }
         for key, sql in queries.items():
             out[key] = con.execute(sql).df() if mapping[key] in tables else pd.DataFrame()
@@ -778,6 +787,112 @@ def player_summary(player_df: pd.DataFrame, team_abbr: str) -> pd.DataFrame:
     return grouped.head(12)
 
 
+@st.cache_data(ttl=300)
+def fetch_live_playoff_bracket() -> pd.DataFrame:
+    """Fetch live playoff series status from NBA API (5-min cache).
+    Returns empty DataFrame if no playoff data or API fails."""
+    try:
+        from pipeline.ingestion.fetch_playoff_status import get_playoff_series_status
+        return get_playoff_series_status()
+    except Exception:
+        return pd.DataFrame()
+
+
+def is_playoff_mode() -> bool:
+    """Check if actual playoff data exists (from pipeline or live fetch)."""
+    return not live_bracket_df.empty
+
+
+def merge_bracket_with_actuals(
+    predicted_series: pd.DataFrame,
+    live_bracket: pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    Produce unified bracket DataFrame blending actual results with predictions.
+
+    - completed series: actual results with model_correct flag
+    - in_progress: actual score + model prediction
+    - not_started (known matchups): model prediction with actual teams
+    - future (unknown matchups): predicted bracket
+    """
+    if live_bracket.empty:
+        out = predicted_series.copy()
+        out["series_status"] = "predicted"
+        out["high_team_wins"] = 0
+        out["low_team_wins"] = 0
+        out["actual_winner"] = None
+        out["model_correct"] = None
+        return out
+
+    rows = []
+
+    # Process each live series
+    for _, lr in live_bracket.iterrows():
+        # Find matching prediction if any
+        pred_match = predicted_series[
+            (predicted_series["conference"] == lr["conference"])
+            & (predicted_series["round"] == lr["round"])
+            & (
+                ((predicted_series["high_team"] == lr["high_team"]) & (predicted_series["low_team"] == lr["low_team"]))
+                | ((predicted_series["high_team"] == lr["low_team"]) & (predicted_series["low_team"] == lr["high_team"]))
+            )
+        ]
+
+        row = {
+            "conference": lr["conference"],
+            "round": lr["round"],
+            "high_seed": int(lr["high_seed"]),
+            "low_seed": int(lr["low_seed"]),
+            "high_team": lr["high_team"],
+            "low_team": lr["low_team"],
+            "series_status": lr["series_status"],
+            "high_team_wins": int(lr["high_team_wins"]),
+            "low_team_wins": int(lr["low_team_wins"]),
+            "actual_winner": lr["actual_winner"],
+        }
+
+        if not pred_match.empty:
+            pm = pred_match.iloc[0]
+            # Match predicted columns — flip if teams are swapped
+            if pm["high_team"] == lr["high_team"]:
+                row["high_team_win_prob"] = float(pm["high_team_win_prob"])
+                row["low_team_win_prob"] = float(pm["low_team_win_prob"])
+            else:
+                row["high_team_win_prob"] = float(pm["low_team_win_prob"])
+                row["low_team_win_prob"] = float(pm["high_team_win_prob"])
+            row["predicted_winner"] = str(pm["predicted_winner"])
+            for col in ["p_4_games", "p_5_games", "p_6_games", "p_7_games", "expected_games", "most_likely_games"]:
+                row[col] = pm.get(col)
+        else:
+            row["high_team_win_prob"] = 0.5
+            row["low_team_win_prob"] = 0.5
+            row["predicted_winner"] = lr["high_team"]
+            for col in ["p_4_games", "p_5_games", "p_6_games", "p_7_games", "expected_games", "most_likely_games"]:
+                row[col] = None
+
+        # Model correctness for completed series
+        if lr["series_status"] == "completed" and lr["actual_winner"]:
+            row["model_correct"] = (row["predicted_winner"] == lr["actual_winner"])
+        else:
+            row["model_correct"] = None
+
+        rows.append(row)
+
+    # Add predicted series for rounds not yet in live bracket
+    live_rounds = set(live_bracket["round"].unique())
+    for _, pr in predicted_series.iterrows():
+        if pr["round"] not in live_rounds:
+            row = pr.to_dict()
+            row["series_status"] = "predicted"
+            row["high_team_wins"] = 0
+            row["low_team_wins"] = 0
+            row["actual_winner"] = None
+            row["model_correct"] = None
+            rows.append(row)
+
+    return pd.DataFrame(rows)
+
+
 def projected_series_games(row: pd.Series) -> int:
     """Return projected total games in series as integer in [4, 7].
     Uses most_likely_games (mode of discrete distribution) for better variance."""
@@ -819,27 +934,60 @@ def projected_series_summary(row: pd.Series) -> dict:
 
 
 def bracket_series_card_html(row: pd.Series | None, connector: str) -> str:
-    """Return HTML card for bracket shelf."""
+    """Return HTML card for bracket shelf. Supports 3 states: completed, in_progress, predicted."""
     if row is None:
         return f"<div class='br-card placeholder {connector}'></div>"
 
+    status = row.get("series_status", "predicted")
+
+    if status == "completed" and row.get("actual_winner"):
+        winner = str(row["actual_winner"])
+        high = str(row["high_team"])
+        low = str(row["low_team"])
+        loser = low if winner == high else high
+        hw = int(row.get("high_team_wins", 0))
+        lw = int(row.get("low_team_wins", 0))
+        w_wins = hw if winner == high else lw
+        l_wins = lw if winner == high else hw
+        model_correct = row.get("model_correct")
+        correct_cls = "correct" if model_correct else "wrong" if model_correct is False else ""
+        badge = '<span class="correct-badge">&#10003;</span>' if model_correct else '<span class="wrong-badge">&#10007;</span>' if model_correct is False else ""
+        return (
+            f'<div class="br-card completed {correct_cls} {connector}">'
+            f'<div class="br-row winner"><img src="{logo_url(winner)}" class="br-logo"/><span>{escape(winner)}</span>{badge}</div>'
+            f'<div class="br-row loser"><img src="{logo_url(loser)}" class="br-logo small"/><span>{escape(loser)}</span></div>'
+            f'<div class="br-score">{escape(winner)} {w_wins} - {escape(loser)} {l_wins}</div>'
+            f'<div class="br-odds">Final</div>'
+            f'</div>'
+        )
+
+    if status == "in_progress":
+        high = str(row["high_team"])
+        low = str(row["low_team"])
+        hw = int(row.get("high_team_wins", 0))
+        lw = int(row.get("low_team_wins", 0))
+        leader = high if hw > lw else low if lw > hw else ""
+        lead_txt = f"{leader} leads {max(hw,lw)}-{min(hw,lw)}" if leader else f"Tied {hw}-{lw}"
+        pred = projected_series_summary(row)
+        return (
+            f'<div class="br-card in-progress {connector}">'
+            f'<div class="br-row winner"><img src="{logo_url(high)}" class="br-logo"/><span>{escape(high)}</span><span class="live-badge">LIVE</span></div>'
+            f'<div class="br-row loser"><img src="{logo_url(low)}" class="br-logo small"/><span>{escape(low)}</span></div>'
+            f'<div class="br-score series-score">{escape(lead_txt)}</div>'
+            f'<div class="br-odds">Pred: {escape(pred["winner"])} {pred["win_prob"]:.0%}</div>'
+            f'</div>'
+        )
+
+    # Default: predicted
     proj = projected_series_summary(row)
-    return dedent(
-        f"""
-        <div class="br-card {connector}">
-            <div class="br-row winner">
-                <img src="{logo_url(proj['winner'])}" class="br-logo"/>
-                <span>{escape(proj['winner'])}</span>
-            </div>
-            <div class="br-row loser">
-                <img src="{logo_url(proj['loser'])}" class="br-logo small"/>
-                <span>{escape(proj['loser'])}</span>
-            </div>
-            <div class="br-score">{escape(proj['scoreline'])}</div>
-            <div class="br-odds">Win odds <span>{proj['win_prob']:.1%}</span></div>
-        </div>
-    """
-    ).strip()
+    return (
+        f'<div class="br-card {connector}">'
+        f'<div class="br-row winner"><img src="{logo_url(proj["winner"])}" class="br-logo"/><span>{escape(proj["winner"])}</span></div>'
+        f'<div class="br-row loser"><img src="{logo_url(proj["loser"])}" class="br-logo small"/><span>{escape(proj["loser"])}</span></div>'
+        f'<div class="br-score">{escape(proj["scoreline"])}</div>'
+        f'<div class="br-odds">Win odds <span>{proj["win_prob"]:.1%}</span></div>'
+        f'</div>'
+    )
 
 
 def build_round_cards(series_df: pd.DataFrame, conference: str, rnd: str, expected_n: int, connector: str) -> str:
@@ -1070,6 +1218,18 @@ def add_theme() -> None:
             font-size: 0.72rem;
         }
         .br-odds span { color: var(--brand); font-weight: 700; }
+        /* Playoff mode bracket states */
+        .br-card.completed { border-left: 3px solid #059669; }
+        .br-card.completed.wrong { border-left: 3px solid #DC2626; }
+        .br-card.in-progress { border-left: 3px solid #F59E0B; }
+        .live-badge {
+            background: #DC2626; color: white; font-size: 0.58rem;
+            padding: 1px 5px; border-radius: 3px; font-weight: 700;
+            margin-left: 0.3rem; vertical-align: middle;
+        }
+        .correct-badge { color: #059669; font-weight: 700; margin-left: 0.25rem; font-size: 0.8rem; }
+        .wrong-badge { color: #DC2626; font-weight: 700; margin-left: 0.25rem; font-size: 0.8rem; }
+        .series-score { color: var(--ink); font-weight: 700; }
         .br-card.to-right::after {
             content: "";
             position: absolute;
@@ -1208,6 +1368,7 @@ remaining_games_df = tables.get("remaining_games", pd.DataFrame())
 projected_records_df = tables.get("projected_records", pd.DataFrame())
 daily_model_scores_df = tables.get("daily_model_scores", pd.DataFrame())
 player_impact_df = tables.get("player_impact", pd.DataFrame())
+live_bracket_df = tables.get("live_bracket", pd.DataFrame())
 
 # Overlay live standings on current_preds_df so records stay up to date between pipeline runs
 live_standings = fetch_live_standings()
@@ -1285,12 +1446,21 @@ def _title_badge(abbr: str, prob: float, rank: int) -> str:
     """Return plain-English badge for a team's title outlook."""
     if rank == 1:
         return "★ Favorite"
-    preseason = _PRESEASON_PROBS.get(abbr, 1 / 30)
-    if prob > preseason * 2.5 and prob > 0.05:
-        return "↑ Surprise"
     if prob >= 0.05:
         return "→ Contender"
-    return "⚠ Longshot"
+    return "⚠ Long Shot"
+
+
+def _title_badge_detail(abbr: str, prob: float, rank: int) -> str:
+    """Extended badge label — includes 'Surprise' info for detail panels."""
+    if rank == 1:
+        return "★ Favorite"
+    preseason = _PRESEASON_PROBS.get(abbr, 1 / 30)
+    if prob > preseason * 2.5 and prob > 0.05:
+        return "↑ Surprise Contender"
+    if prob >= 0.05:
+        return "→ Contender"
+    return "⚠ Long Shot"
 
 
 def build_analyst_context() -> str:
@@ -1579,7 +1749,7 @@ with tab_who:
 
     # Championship odds leaderboard — clickable tiles with inline detail
     st.markdown("<div class='section-label'>Championship Odds — All Playoff Contenders</div>", unsafe_allow_html=True)
-    st.caption("Based on 10,000 simulated playoff brackets. Tap a team to see details.")
+    st.caption("Based on 10,000 simulated playoff brackets. Tap a team logo for details.")
 
     if title_df.empty:
         st.info("Run the simulation pipeline to generate championship odds.")
@@ -1599,6 +1769,11 @@ with tab_who:
             for team, grp in player_impact_df.groupby("TEAM_ABBR"):
                 _impact_map[team] = grp.sort_values("ppg", ascending=False).head(3)
 
+        # Live standings for up-to-date records on tiles
+        _live_map = {}
+        if not live_standings.empty:
+            _live_map = live_standings.set_index("TEAM_ABBR")[["wins", "losses"]].to_dict("index")
+
         # Track which team is selected
         if "who_selected" not in st.session_state:
             st.session_state.who_selected = None
@@ -1611,8 +1786,8 @@ with tab_who:
             bar_pct = int(prob / max_prob * 100) if max_prob > 0 else 0
             is_selected = st.session_state.who_selected == abbr
 
-            badge_color = {"★ Favorite": "#059669", "↑ Surprise": "#2563EB", "→ Contender": "#6B7280", "⚠ Longshot": "#9CA3AF"}.get(badge, "#9CA3AF")
-            bar_color = TEAM_COLORS.get(abbr, "#0f4fd8")
+            badge_color = {"★ Favorite": "#059669", "→ Contender": "#2563EB", "⚠ Long Shot": "#9CA3AF"}.get(badge, "#9CA3AF")
+            bar_color = {"★ Favorite": "#059669", "→ Contender": "#3b82f6", "⚠ Long Shot": "#d1d5db"}.get(badge, "#d1d5db")
             border_style = f"2px solid {bar_color}" if is_selected else "1px solid #e5e7eb"
             bg = "rgba(240,245,255,0.95)" if is_selected else "rgba(255,255,255,0.8)"
 
@@ -1628,8 +1803,32 @@ with tab_who:
                     st.session_state.who_selected = None if is_selected else abbr
                     st.rerun()
             with tile_cols[1]:
+                # Build subtitle: record · seed/conf · net rating
+                _pr = _preds_map.get(abbr, {})
+                _fr = _feats_map.get(abbr, {})
+                _lv = _live_map.get(abbr, {})
+                sub_parts: list[str] = []
+                # Prefer live record, fall back to pipeline
+                _w = _lv.get("wins") if _lv else None
+                _l = _lv.get("losses") if _lv else None
+                if _w is None and _pr:
+                    _w, _l = int(_pr.get("wins", 0)), int(_pr.get("losses", 0))
+                if _w is not None:
+                    sub_parts.append(f"{int(_w)}-{int(_l)}")
+                if _pr:
+                    _seed = _pr.get("playoff_seed")
+                    if _seed == _seed and _seed is not None:
+                        sub_parts.append(f"#{int(_seed)} {_pr.get('conference', '')}")
+                if _fr:
+                    _nr = _fr.get("rs_net_rating")
+                    if _nr == _nr and _nr is not None:
+                        sub_parts.append(f"Net {float(_nr):+.1f}")
+                subtitle = " · ".join(sub_parts)
+                sub_html = f'<div style="font-size:0.75rem;color:#64748b;margin-top:1px;">{subtitle}</div>' if subtitle else ""
+
                 st.markdown(
                     f'<div style="font-weight:700;font-size:0.95rem;line-height:1.2;">{full_name}</div>'
+                    f'{sub_html}'
                     f'<div style="background:#e5e7eb;border-radius:4px;height:6px;margin-top:4px;">'
                     f'  <div style="background:{bar_color};border-radius:4px;height:6px;width:{bar_pct}%;"></div>'
                     f'</div>',
@@ -1650,7 +1849,13 @@ with tab_who:
                 pr = _preds_map.get(abbr, {})
                 fr = _feats_map.get(abbr, {})
 
-                rec = f"{int(pr['wins'])}-{int(pr['losses'])}" if pr else ""
+                _dlv = _live_map.get(abbr, {})
+                if _dlv:
+                    rec = f"{int(_dlv['wins'])}-{int(_dlv['losses'])}"
+                elif pr:
+                    rec = f"{int(pr['wins'])}-{int(pr['losses'])}"
+                else:
+                    rec = ""
                 seed_str = ""
                 if pr:
                     seed = pr.get("playoff_seed")
@@ -1662,22 +1867,26 @@ with tab_who:
                 with detail_l:
                     st.caption(f"{rec} · {seed_str}" if seed_str else rec)
 
-                    # Playoff path funnel
-                    r2_p = float(sel_row.get("make_second_round_prob", 0))
-                    cf_p = float(sel_row.get("make_conf_finals_prob", 0))
-                    fin_p = float(sel_row.get("make_finals_prob", 0))
-                    st.markdown(
-                        f'<div style="display:flex;align-items:center;gap:0.3rem;flex-wrap:wrap;margin:0.3rem 0 0.5rem 0;">'
-                        f'<span style="background:#dbeafe;border-radius:6px;padding:3px 8px;font-weight:600;font-size:0.8rem;">2nd Rd {r2_p:.0%}</span>'
-                        f'<span style="color:#94a3b8;">→</span>'
-                        f'<span style="background:#c7d2fe;border-radius:6px;padding:3px 8px;font-weight:600;font-size:0.8rem;">Conf Finals {cf_p:.0%}</span>'
-                        f'<span style="color:#94a3b8;">→</span>'
-                        f'<span style="background:#a5b4fc;border-radius:6px;padding:3px 8px;font-weight:600;font-size:0.8rem;color:#312e81;">Finals {fin_p:.0%}</span>'
-                        f'<span style="color:#94a3b8;">→</span>'
-                        f'<span style="background:#6366f1;border-radius:6px;padding:3px 8px;font-weight:700;font-size:0.8rem;color:white;">Title {prob:.0%}</span>'
-                        f'</div>',
-                        unsafe_allow_html=True,
-                    )
+                    # Next game
+                    if not remaining_games_df.empty:
+                        _team_sched = remaining_games_df[remaining_games_df["TEAM_ABBR"] == abbr].sort_values("GAME_DATE")
+                        if not _team_sched.empty:
+                            _ng = _team_sched.iloc[0]
+                            _opp = str(_ng["OPP_ABBR"])
+                            _home = "vs" if _ng.get("IS_HOME") else "@"
+                            _wp = float(_ng.get("GAME_WIN_PROB", 0.5))
+                            _dt = pd.Timestamp(_ng["GAME_DATE"]).strftime("%b %-d")
+                            _wp_color = "#059669" if _wp >= 0.6 else "#DC2626" if _wp < 0.4 else "#6B7280"
+                            st.markdown(
+                                f'<div style="display:flex;align-items:center;gap:0.4rem;margin:0.3rem 0 0.5rem 0;">'
+                                f'<span style="font-size:0.8rem;color:#64748b;">Next:</span>'
+                                f'<img src="{logo_url(_opp)}" style="height:1.2rem;vertical-align:middle;">'
+                                f'<span style="font-weight:600;font-size:0.85rem;">{_home} {_opp}</span>'
+                                f'<span style="font-size:0.78rem;color:#64748b;">{_dt}</span>'
+                                f'<span style="font-size:0.78rem;font-weight:600;color:{_wp_color};">{_wp:.0%} win</span>'
+                                f'</div>',
+                                unsafe_allow_html=True,
+                            )
 
                     if fr:
                         metric_parts = []
@@ -1847,44 +2056,106 @@ with tab_bracket:
     if series_df.empty:
         st.info("Run the simulation pipeline to generate bracket predictions.")
     else:
-        st.markdown("<div class='section-label'>Projected First-Round Matchups</div>", unsafe_allow_html=True)
-        st.caption("Plain-English series previews based on 10,000 simulated brackets.")
-
+        _playoff_mode = is_playoff_mode()
         round_order = ["First Round", "Conference Semifinals", "Conference Finals", "NBA Finals"]
-        first_round = series_df[series_df["round"] == "First Round"].copy()
-        first_round["_conf_sort"] = first_round["conference"].map({"East": 0, "West": 1})
+
+        if _playoff_mode:
+            # Merge actual results with predictions
+            _bracket_df = merge_bracket_with_actuals(series_df, live_bracket_df)
+
+            # Model accuracy tracker
+            _completed = _bracket_df[_bracket_df["series_status"] == "completed"]
+            _in_prog = _bracket_df[_bracket_df["series_status"] == "in_progress"]
+            if not _completed.empty:
+                _correct = int(_completed["model_correct"].sum())
+                _total = len(_completed)
+                _acc_pct = f"{_correct}/{_total}"
+                _acc_cols = st.columns([1, 1, 1])
+                with _acc_cols[0]:
+                    st.metric("Model Accuracy", _acc_pct, delta=f"{_correct/_total:.0%}" if _total else None)
+                with _acc_cols[1]:
+                    st.metric("Series Completed", str(_total))
+                with _acc_cols[2]:
+                    st.metric("In Progress", str(len(_in_prog)))
+            st.caption("Live bracket — actual results overlaid on model predictions.")
+        else:
+            _bracket_df = series_df
+            st.markdown("<div class='section-label'>Projected First-Round Matchups</div>", unsafe_allow_html=True)
+            st.caption("Plain-English series previews based on 10,000 simulated brackets.")
+
+        # First-round narrative summaries
+        first_round = _bracket_df[_bracket_df["round"] == "First Round"].copy()
+        first_round["_conf_sort"] = first_round["conference"].map({"East": 0, "West": 1}).fillna(2)
         first_round = first_round.sort_values(["_conf_sort", "high_seed"])
 
         for _, sr in first_round.iterrows():
             high = str(sr["high_team"])
             low = str(sr["low_team"])
-            high_prob = float(sr["high_team_win_prob"])
-            low_prob = float(sr["low_team_win_prob"])
-            winner = str(sr["predicted_winner"])
-            win_prob = high_prob if winner == high else low_prob
-            win_city = team_full_name(winner, city_only=True)
-            lose_city = team_full_name(low if winner == high else high, city_only=True)
-            mlg = int(sr.get("most_likely_games", 6) or 6)
-            heavy = "heavy " if win_prob > 0.70 else ""
-            conf = str(sr.get("conference", ""))
+            _sr_status = sr.get("series_status", "predicted")
 
-            plain = (
-                f"**{team_full_name(high, city_only=True)} vs {team_full_name(low, city_only=True)}** "
-                f"({conf}) — {win_city} are {heavy}favored with a **{win_prob:.0%} chance** to advance. "
-                f"Series likely goes **{mlg} games**."
-            )
-            c_logo, c_text = st.columns([1, 10])
-            with c_logo:
-                st.image(logo_url(winner), width=36)
-            with c_text:
-                st.markdown(plain)
+            if _sr_status == "completed" and sr.get("actual_winner"):
+                _aw = str(sr["actual_winner"])
+                _al = low if _aw == high else high
+                hw = int(sr.get("high_team_wins", 0))
+                lw = int(sr.get("low_team_wins", 0))
+                _w_wins = hw if _aw == high else lw
+                _l_wins = lw if _aw == high else hw
+                _mc = sr.get("model_correct")
+                _mc_tag = " (model correct)" if _mc else " (upset!)" if _mc is False else ""
+                plain = (
+                    f"**{team_full_name(high, city_only=True)} vs {team_full_name(low, city_only=True)}** "
+                    f"— {team_full_name(_aw, city_only=True)} won **{_w_wins}-{_l_wins}**{_mc_tag}"
+                )
+                c_logo, c_text = st.columns([1, 10])
+                with c_logo:
+                    st.image(logo_url(_aw), width=36)
+                with c_text:
+                    st.markdown(plain)
+
+            elif _sr_status == "in_progress":
+                hw = int(sr.get("high_team_wins", 0))
+                lw = int(sr.get("low_team_wins", 0))
+                leader = high if hw > lw else low if lw > hw else ""
+                lead_txt = f"{leader} leads {max(hw,lw)}-{min(hw,lw)}" if leader else f"Tied {hw}-{lw}"
+                pred_winner = str(sr.get("predicted_winner", high))
+                pred_prob = float(sr.get("high_team_win_prob", 0.5)) if pred_winner == high else float(sr.get("low_team_win_prob", 0.5))
+                plain = (
+                    f"**{team_full_name(high, city_only=True)} vs {team_full_name(low, city_only=True)}** "
+                    f"— {lead_txt} | Model: {team_full_name(pred_winner, city_only=True)} **{pred_prob:.0%}**"
+                )
+                c_logo, c_text = st.columns([1, 10])
+                with c_logo:
+                    st.image(logo_url(leader or high), width=36)
+                with c_text:
+                    st.markdown(plain)
+
+            else:
+                high_prob = float(sr["high_team_win_prob"])
+                low_prob = float(sr["low_team_win_prob"])
+                winner = str(sr["predicted_winner"])
+                win_prob = high_prob if winner == high else low_prob
+                win_city = team_full_name(winner, city_only=True)
+                mlg = int(sr.get("most_likely_games", 6) or 6)
+                heavy = "heavy " if win_prob > 0.70 else ""
+                conf = str(sr.get("conference", ""))
+
+                plain = (
+                    f"**{team_full_name(high, city_only=True)} vs {team_full_name(low, city_only=True)}** "
+                    f"({conf}) — {win_city} are {heavy}favored with a **{win_prob:.0%} chance** to advance. "
+                    f"Series likely goes **{mlg} games**."
+                )
+                c_logo, c_text = st.columns([1, 10])
+                with c_logo:
+                    st.image(logo_url(winner), width=36)
+                with c_text:
+                    st.markdown(plain)
 
         st.markdown("<br>", unsafe_allow_html=True)
-        with st.expander("📊 Show full bracket & technical series detail"):
-            render_playoff_bracket_board(series_df)
+        with st.expander("Show full bracket & technical series detail"):
+            render_playoff_bracket_board(_bracket_df)
             st.markdown("---")
             st.markdown("<div class='section-label'>Series Detail</div>", unsafe_allow_html=True)
-            sorted_series = series_df.copy()
+            sorted_series = _bracket_df.copy()
             sorted_series["_ro"] = sorted_series["round"].map(lambda x: round_order.index(x) if x in round_order else 9)
             sorted_series = sorted_series.sort_values(["_ro", "conference", "high_seed"])
             series_labels_b = [
@@ -1904,21 +2175,59 @@ with tab_bracket:
                 low_prob_b = float(sel_row_b["low_team_win_prob"])
                 winner_b = str(sel_row_b["predicted_winner"])
                 win_prob_b = high_prob_b if winner_b == high_team_b else low_prob_b
-                col_h_b, col_vs_b, col_l_b = st.columns([2, 1, 2])
-                with col_h_b:
-                    st.image(logo_url(high_team_b), width=72)
-                    st.markdown(f"**{high_team_b}** (Seed {int(sel_row_b['high_seed'])})")
-                    st.markdown(f"Win prob: **{high_prob_b:.1%}**")
-                with col_vs_b:
-                    st.markdown("<div style='text-align:center;font-size:1.4rem;font-weight:700;padding-top:1.5rem;'>vs</div>", unsafe_allow_html=True)
-                with col_l_b:
-                    st.image(logo_url(low_team_b), width=72)
-                    st.markdown(f"**{low_team_b}** (Seed {int(sel_row_b['low_seed'])})")
-                    st.markdown(f"Win prob: **{low_prob_b:.1%}**")
-                st.markdown(f"**Projected winner: {winner_b}** ({win_prob_b:.1%})")
-                st.progress(win_prob_b if winner_b == high_team_b else 1 - win_prob_b)
+
+                _detail_status = sel_row_b.get("series_status", "predicted")
+                if _detail_status == "completed" and sel_row_b.get("actual_winner"):
+                    _aw_b = str(sel_row_b["actual_winner"])
+                    _hw_b = int(sel_row_b.get("high_team_wins", 0))
+                    _lw_b = int(sel_row_b.get("low_team_wins", 0))
+                    col_h_b, col_vs_b, col_l_b = st.columns([2, 1, 2])
+                    with col_h_b:
+                        st.image(logo_url(high_team_b), width=72)
+                        st.markdown(f"**{high_team_b}**")
+                        st.markdown(f"{'**WINNER**' if _aw_b == high_team_b else 'Eliminated'}")
+                    with col_vs_b:
+                        st.markdown(f"<div style='text-align:center;font-size:1.2rem;font-weight:700;padding-top:1.5rem;'>{_hw_b} - {_lw_b}</div>", unsafe_allow_html=True)
+                    with col_l_b:
+                        st.image(logo_url(low_team_b), width=72)
+                        st.markdown(f"**{low_team_b}**")
+                        st.markdown(f"{'**WINNER**' if _aw_b == low_team_b else 'Eliminated'}")
+                    _mc_b = sel_row_b.get("model_correct")
+                    if _mc_b is True:
+                        st.success(f"Model predicted {winner_b} ({win_prob_b:.0%}) — Correct")
+                    elif _mc_b is False:
+                        st.error(f"Model predicted {winner_b} ({win_prob_b:.0%}) — Wrong")
+                elif _detail_status == "in_progress":
+                    _hw_b = int(sel_row_b.get("high_team_wins", 0))
+                    _lw_b = int(sel_row_b.get("low_team_wins", 0))
+                    col_h_b, col_vs_b, col_l_b = st.columns([2, 1, 2])
+                    with col_h_b:
+                        st.image(logo_url(high_team_b), width=72)
+                        st.markdown(f"**{high_team_b}**")
+                        st.metric("Wins", str(_hw_b))
+                    with col_vs_b:
+                        st.markdown(f"<div style='text-align:center;font-size:1.2rem;font-weight:700;padding-top:1.5rem;'>{_hw_b} - {_lw_b}</div>", unsafe_allow_html=True)
+                    with col_l_b:
+                        st.image(logo_url(low_team_b), width=72)
+                        st.markdown(f"**{low_team_b}**")
+                        st.metric("Wins", str(_lw_b))
+                    st.info(f"Model prediction: {winner_b} wins series ({win_prob_b:.0%})")
+                else:
+                    col_h_b, col_vs_b, col_l_b = st.columns([2, 1, 2])
+                    with col_h_b:
+                        st.image(logo_url(high_team_b), width=72)
+                        st.markdown(f"**{high_team_b}** (Seed {int(sel_row_b['high_seed'])})")
+                        st.markdown(f"Win prob: **{high_prob_b:.1%}**")
+                    with col_vs_b:
+                        st.markdown("<div style='text-align:center;font-size:1.4rem;font-weight:700;padding-top:1.5rem;'>vs</div>", unsafe_allow_html=True)
+                    with col_l_b:
+                        st.image(logo_url(low_team_b), width=72)
+                        st.markdown(f"**{low_team_b}** (Seed {int(sel_row_b['low_seed'])})")
+                        st.markdown(f"Win prob: **{low_prob_b:.1%}**")
+                    st.markdown(f"**Projected winner: {winner_b}** ({win_prob_b:.1%})")
+                    st.progress(win_prob_b if winner_b == high_team_b else 1 - win_prob_b)
                 p_cols_b = ["p_4_games", "p_5_games", "p_6_games", "p_7_games"]
-                if all(c in sel_row_b.index for c in p_cols_b):
+                if all(c in sel_row_b.index for c in p_cols_b) and _detail_status == "predicted":
                     length_vals_b = [float(sel_row_b[c]) for c in p_cols_b]
                     mlg_val_b = int(sel_row_b.get("most_likely_games", 6) or 6)
                     fig_len_b = go.Figure(go.Bar(

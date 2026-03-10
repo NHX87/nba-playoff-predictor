@@ -36,6 +36,7 @@ from pipeline.models.predict_current import predict_current_season
 from pipeline.models.sanity_report import generate_sanity_report
 from pipeline.models.simulation import main as run_simulation
 from pipeline.models.survival import train_survival_model
+from config.settings import DB_PATH
 
 
 @dataclass
@@ -121,7 +122,33 @@ def main() -> None:
 
     if args.with_current_projections:
         _run_stage(Stage("Predict current season field", predict_current_season))
-        _run_stage(Stage("Run Monte Carlo simulation", run_simulation))
+
+        # Check for live playoff data — run conditional MC if playoffs have started
+        from pipeline.ingestion.fetch_playoff_status import get_playoff_series_status
+        live_bracket = get_playoff_series_status()
+        if not live_bracket.empty:
+            completed = live_bracket[live_bracket["series_status"] == "completed"]
+            print(f"  Playoff mode: {len(live_bracket)} series found, {len(completed)} completed")
+            from pipeline.models.simulation import (
+                build_locked_results_from_live,
+                run_conditional_monte_carlo,
+                write_outputs as write_sim_outputs,
+            )
+            locked = build_locked_results_from_live(live_bracket)
+            results = run_conditional_monte_carlo(locked_results=locked, live_bracket=live_bracket)
+            write_sim_outputs(*results)
+
+            # Also persist live bracket to DuckDB
+            import duckdb
+            con = duckdb.connect(DB_PATH)
+            try:
+                con.execute("DROP TABLE IF EXISTS playoff_bracket_live")
+                con.execute("CREATE TABLE playoff_bracket_live AS SELECT * FROM live_bracket")
+            finally:
+                con.close()
+        else:
+            _run_stage(Stage("Run Monte Carlo simulation", run_simulation))
+
         _run_stage(Stage("Compute daily historical model scores", compute_daily_model_scores))
         _run_stage(Stage("Compute player impact splits", compute_player_impact))
 
