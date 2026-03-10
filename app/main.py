@@ -190,7 +190,7 @@ def fetch_live_standings() -> pd.DataFrame:
             "cavaliers": "CLE", "mavericks": "DAL", "nuggets": "DEN", "pistons": "DET", "warriors": "GSW",
             "rockets": "HOU", "pacers": "IND", "clippers": "LAC", "lakers": "LAL", "grizzlies": "MEM",
             "heat": "MIA", "bucks": "MIL", "timberwolves": "MIN", "pelicans": "NOP", "knicks": "NYK",
-            "thunder": "OKC", "magic": "ORL", "76ers": "PHI", "suns": "PHX", "trail-blazers": "POR",
+            "thunder": "OKC", "magic": "ORL", "sixers": "PHI", "76ers": "PHI", "suns": "PHX", "blazers": "POR", "trail-blazers": "POR",
             "kings": "SAC", "spurs": "SAS", "raptors": "TOR", "jazz": "UTA", "wizards": "WAS",
         }
         df["TEAM_ABBR"] = df["TeamSlug"].map(slug_to_abbr)
