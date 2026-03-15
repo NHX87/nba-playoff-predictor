@@ -181,14 +181,17 @@ jobs:
           repo_id = os.environ["HF_REPO_ID"]
 
           # Recreate repo to purge stale LFS history that inflates storage
+          import time
           try:
               api.delete_repo(repo_id, repo_type="space")
               print("Deleted old HF Space to purge LFS history")
+              time.sleep(5)
           except Exception:
               print("No existing repo to delete (or already gone)")
-          api.create_repo(repo_id, repo_type="space", space_sdk="streamlit", exist_ok=True)
+          # Create with gradio SDK placeholder — README.md frontmatter overrides to streamlit
+          api.create_repo(repo_id, repo_type="space", space_sdk="gradio", exist_ok=True)
 
-          # Push entire repo (code + data + model artifacts) to HF Spaces
+          # Push entire repo (README.md frontmatter sets sdk: streamlit)
           api.upload_folder(
               folder_path=".",
               repo_id=repo_id,
