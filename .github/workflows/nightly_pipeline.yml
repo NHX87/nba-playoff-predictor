@@ -148,6 +148,7 @@ jobs:
               "daily_model_scores",     # historical CoxPH scores per team per game date
               "player_impact",          # with/without splits for player impact quantification
               "playoff_bracket_live",   # live playoff series results (only exists during playoffs)
+              "live_standings",         # latest standings from self-hosted runner (API fallback for HF)
           ]
 
           src = duckdb.connect("data/processed/nba.duckdb", read_only=True)

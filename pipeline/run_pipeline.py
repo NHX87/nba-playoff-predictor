@@ -149,6 +149,24 @@ def main() -> None:
         else:
             _run_stage(Stage("Run Monte Carlo simulation", run_simulation))
 
+        # Persist latest standings into DuckDB so HF Spaces can use them as fallback
+        def _persist_standings() -> None:
+            import duckdb
+            from pathlib import Path
+            cache = Path("data/processed/standings_cache.csv")
+            if cache.exists():
+                import pandas as pd
+                df = pd.read_csv(cache)
+                con = duckdb.connect(DB_PATH)
+                try:
+                    con.execute("DROP TABLE IF EXISTS live_standings")
+                    con.execute("CREATE TABLE live_standings AS SELECT * FROM df")
+                    print(f"  Persisted {len(df)} rows → live_standings")
+                finally:
+                    con.close()
+
+        _run_stage(Stage("Persist standings to DuckDB", _persist_standings))
+
         _run_stage(Stage("Compute daily historical model scores", compute_daily_model_scores))
 
         def _run_player_impact() -> None:

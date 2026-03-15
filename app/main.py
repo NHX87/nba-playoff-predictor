@@ -298,6 +298,10 @@ def load_base_tables() -> dict[str, pd.DataFrame]:
             FROM playoff_bracket_live
             ORDER BY round_num, conference, high_seed
         """,
+        "cached_standings": """
+            SELECT TEAM_ABBR, conference, wins, losses, win_pct, Record
+            FROM live_standings
+        """,
     }
 
     try:
@@ -320,6 +324,7 @@ def load_base_tables() -> dict[str, pd.DataFrame]:
             "daily_model_scores": "daily_model_scores",
             "player_impact": "player_impact",
             "live_bracket": "playoff_bracket_live",
+            "cached_standings": "live_standings",
         }
         for key, sql in queries.items():
             out[key] = con.execute(sql).df() if mapping[key] in tables else pd.DataFrame()
@@ -1372,6 +1377,8 @@ live_bracket_df = tables.get("live_bracket", pd.DataFrame())
 
 # Overlay live standings on current_preds_df so records stay up to date between pipeline runs
 live_standings = fetch_live_standings()
+if live_standings.empty:
+    live_standings = tables.get("cached_standings", pd.DataFrame())
 if not live_standings.empty and not current_preds_df.empty:
     live_map = live_standings.set_index("TEAM_ABBR")[["wins", "losses", "win_pct", "Record"]].to_dict("index")
     for col in ["wins", "losses", "win_pct"]:
