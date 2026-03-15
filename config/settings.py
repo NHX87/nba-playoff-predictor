@@ -6,8 +6,11 @@ load_dotenv()
 # --- DATABASE ---
 # Streamlit Community Cloud sets secrets via st.secrets, which are also
 # injected as environment variables — so os.getenv picks them up automatically.
-# Locally: uses full nba.duckdb. On Streamlit Cloud: uses slim nba_app.duckdb.
-DB_PATH = os.getenv("DB_PATH", "data/processed/nba.duckdb")
+# Locally: uses full nba.duckdb. On HF Spaces / Streamlit Cloud: falls back to slim nba_app.duckdb.
+_default_db = "data/processed/nba.duckdb"
+if not os.path.exists(_default_db) and os.path.exists("data/processed/nba_app.duckdb"):
+    _default_db = "data/processed/nba_app.duckdb"
+DB_PATH = os.getenv("DB_PATH", _default_db)
 
 # --- SEASONS ---
 TRAIN_SEASON_START = int(os.getenv("TRAIN_SEASON_START", 2010))
