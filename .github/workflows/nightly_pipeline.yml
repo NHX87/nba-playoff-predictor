@@ -168,6 +168,29 @@ jobs:
           print("Export complete.")
           EOF
 
+      - name: Clean stale files from HF Spaces
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_REPO_ID: ${{ env.HF_REPO_ID }}
+        run: |
+          python - <<'EOF'
+          import os
+          from huggingface_hub import HfApi, CommitOperationDelete
+
+          api = HfApi(token=os.environ["HF_TOKEN"])
+          repo_id = os.environ["HF_REPO_ID"]
+
+          files = api.list_repo_files(repo_id, repo_type="space")
+          stale = [f for f in files if f.startswith("data/raw/")]
+          if stale:
+              ops = [CommitOperationDelete(path_in_repo=f) for f in stale]
+              api.create_commit(repo_id, repo_type="space", operations=ops,
+                  commit_message="chore: remove stale data/raw/ parquets")
+              print(f"Deleted {len(stale)} stale files from HF Spaces")
+          else:
+              print("No stale data/raw/ files to clean")
+          EOF
+
       - name: Push artifacts to Hugging Face Spaces
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
