@@ -1376,7 +1376,20 @@ player_impact_df = tables.get("player_impact", pd.DataFrame())
 live_bracket_df = tables.get("live_bracket", pd.DataFrame())
 
 # Overlay live standings on current_preds_df so records stay up to date between pipeline runs
+# Priority: live API → computed from game logs → DuckDB cached standings
 live_standings = fetch_live_standings()
+if live_standings.empty:
+    # Compute current records from regular-season game logs (always fresh from nightly parquets)
+    rs_df = tables.get("rs", pd.DataFrame())
+    if not rs_df.empty and "WL" in rs_df.columns:
+        _wl = rs_df.groupby("TEAM_ABBR")["WL"].value_counts().unstack(fill_value=0)
+        _wl = _wl.rename(columns={"W": "wins", "L": "losses"})
+        for c in ["wins", "losses"]:
+            if c not in _wl.columns:
+                _wl[c] = 0
+        _wl["win_pct"] = _wl["wins"] / (_wl["wins"] + _wl["losses"])
+        _wl["Record"] = _wl["wins"].astype(int).astype(str) + "-" + _wl["losses"].astype(int).astype(str)
+        live_standings = _wl.reset_index()
 if live_standings.empty:
     live_standings = tables.get("cached_standings", pd.DataFrame())
 if not live_standings.empty and not current_preds_df.empty:
