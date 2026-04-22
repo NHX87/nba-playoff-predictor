@@ -298,6 +298,10 @@ def load_base_tables() -> dict[str, pd.DataFrame]:
             FROM playoff_bracket_live
             ORDER BY round_num, conference, high_seed
         """,
+        "current_features": f"""
+            SELECT * FROM current_feature_snapshot
+            WHERE SEASON = '{CURRENT_SEASON_STR}'
+        """,
         "cached_standings": """
             SELECT TEAM_ABBR, conference, wins, losses, win_pct, Record
             FROM live_standings
@@ -324,6 +328,7 @@ def load_base_tables() -> dict[str, pd.DataFrame]:
             "daily_model_scores": "daily_model_scores",
             "player_impact": "player_impact",
             "live_bracket": "playoff_bracket_live",
+            "current_features": "current_feature_snapshot",
             "cached_standings": "live_standings",
         }
         for key, sql in queries.items():
@@ -811,6 +816,7 @@ def is_playoff_mode() -> bool:
 def merge_bracket_with_actuals(
     predicted_series: pd.DataFrame,
     live_bracket: pd.DataFrame,
+    feat_df: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """
     Produce unified bracket DataFrame blending actual results with predictions.
@@ -819,6 +825,10 @@ def merge_bracket_with_actuals(
     - in_progress: actual score + model prediction
     - not_started (known matchups): model prediction with actual teams
     - future (unknown matchups): predicted bracket
+
+    When the live bracket has matchups that differ from predictions (e.g. play-in
+    results changed seedings), computes win probabilities on the fly using the
+    matchup model if feat_df is provided.
     """
     if live_bracket.empty:
         out = predicted_series.copy()
@@ -828,6 +838,23 @@ def merge_bracket_with_actuals(
         out["actual_winner"] = None
         out["model_correct"] = None
         return out
+
+    # Lazy-load matchup model for on-the-fly predictions
+    _matchup_artifact = None
+
+    def _compute_win_prob(team_a: str, team_b: str) -> float:
+        """Compute series win prob for team_a vs team_b using matchup model."""
+        nonlocal _matchup_artifact
+        if feat_df is None or feat_df.empty:
+            return 0.5
+        try:
+            if _matchup_artifact is None:
+                from pipeline.models.matchup_model import load_matchup_artifact
+                _matchup_artifact = load_matchup_artifact()
+            from pipeline.models.matchup_model import predict_matchup_prob
+            return predict_matchup_prob(team_a, team_b, feat_df, _matchup_artifact)
+        except Exception:
+            return 0.5
 
     rows = []
 
@@ -869,11 +896,21 @@ def merge_bracket_with_actuals(
             for col in ["p_4_games", "p_5_games", "p_6_games", "p_7_games", "expected_games", "most_likely_games"]:
                 row[col] = pm.get(col)
         else:
-            row["high_team_win_prob"] = 0.5
-            row["low_team_win_prob"] = 0.5
-            row["predicted_winner"] = lr["high_team"]
-            for col in ["p_4_games", "p_5_games", "p_6_games", "p_7_games", "expected_games", "most_likely_games"]:
-                row[col] = None
+            # Compute win probability on the fly for actual matchup
+            high_wp = _compute_win_prob(lr["high_team"], lr["low_team"])
+            row["high_team_win_prob"] = high_wp
+            row["low_team_win_prob"] = 1.0 - high_wp
+            row["predicted_winner"] = lr["high_team"] if high_wp >= 0.5 else lr["low_team"]
+            # Compute series length predictions
+            try:
+                from pipeline.models.series_length import add_series_length_cols
+                tmp = pd.DataFrame([{"win_prob": high_wp}])
+                tmp = add_series_length_cols(tmp, "win_prob")
+                for col in ["p_4_games", "p_5_games", "p_6_games", "p_7_games", "expected_games", "most_likely_games"]:
+                    row[col] = float(tmp[col].iloc[0]) if col in tmp.columns else None
+            except Exception:
+                for col in ["p_4_games", "p_5_games", "p_6_games", "p_7_games", "expected_games", "most_likely_games"]:
+                    row[col] = None
 
         # Model correctness for completed series
         if lr["series_status"] == "completed" and lr["actual_winner"]:
@@ -1374,6 +1411,9 @@ projected_records_df = tables.get("projected_records", pd.DataFrame())
 daily_model_scores_df = tables.get("daily_model_scores", pd.DataFrame())
 player_impact_df = tables.get("player_impact", pd.DataFrame())
 live_bracket_df = tables.get("live_bracket", pd.DataFrame())
+if live_bracket_df.empty:
+    live_bracket_df = fetch_live_playoff_bracket()
+current_features_df = tables.get("current_features", pd.DataFrame())
 
 # Overlay live standings on current_preds_df so records stay up to date between pipeline runs
 # Priority: live API → computed from game logs → DuckDB cached standings
@@ -2081,7 +2121,7 @@ with tab_bracket:
 
         if _playoff_mode:
             # Merge actual results with predictions
-            _bracket_df = merge_bracket_with_actuals(series_df, live_bracket_df)
+            _bracket_df = merge_bracket_with_actuals(series_df, live_bracket_df, current_features_df)
 
             # Model accuracy tracker
             _completed = _bracket_df[_bracket_df["series_status"] == "completed"]

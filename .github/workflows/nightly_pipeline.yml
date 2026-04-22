@@ -43,6 +43,25 @@ jobs:
           python -m pipeline.ingestion.fetch_games
           python -m pipeline.ingestion.fetch_players
 
+      - name: Fetch live standings (Mac Mini has NBA API access)
+        run: |
+          python - <<'EOF'
+          from pipeline.models.predict_current import _fetch_standings_from_api
+          import duckdb, pandas as pd
+          from config.settings import DB_PATH
+
+          con = duckdb.connect(DB_PATH, read_only=True)
+          teams = con.execute("SELECT TEAM_ID, TEAM_ABBREVIATION AS TEAM_ABBR FROM teams").fetchdf()
+          con.close()
+
+          try:
+              standings = _fetch_standings_from_api(teams)
+              standings.to_csv("data/processed/standings_cache.csv", index=False)
+              print(f"Standings fetched: {len(standings)} teams")
+          except Exception as e:
+              print(f"Standings fetch failed (non-fatal): {e}")
+          EOF
+
       - name: Commit updated parquets if data changed
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -63,8 +82,7 @@ jobs:
           subprocess.run(["git", "config", "user.email", "github-actions[bot]@users.noreply.github.com"], check=True)
           subprocess.run(["git", "remote", "set-url", "origin",
               f"https://x-access-token:{token}@github.com/NHX87/nba-playoff-predictor.git"], check=True)
-          # Use data/raw/ so deletions (e.g. playoffs file not yet available) are also staged
-          subprocess.run(["git", "add", "data/raw/"], check=True)
+          subprocess.run(["git", "add", "data/raw/", "data/processed/standings_cache.csv"], check=True)
           # Skip commit if nothing staged (shouldn't happen here but guard anyway)
           diff = subprocess.run(["git", "diff", "--cached", "--quiet"])
           if diff.returncode == 0:
