@@ -46,14 +46,21 @@ jobs:
       - name: Fetch live standings (Mac Mini has NBA API access)
         run: |
           python - <<'EOF'
+          import pandas as pd
+
+          # Build team lookup from raw game log parquets (no DuckDB needed)
+          try:
+              games = pd.read_parquet("data/raw/games_2025-26_Regular_Season.parquet")
+              teams = (
+                  games[["TEAM_ID", "TEAM_ABBREVIATION"]]
+                  .drop_duplicates()
+                  .rename(columns={"TEAM_ABBREVIATION": "TEAM_ABBR"})
+              )
+          except Exception as e:
+              print(f"Could not build team lookup: {e}")
+              import sys; sys.exit(0)
+
           from pipeline.models.predict_current import _fetch_standings_from_api
-          import duckdb, pandas as pd
-          from config.settings import DB_PATH
-
-          con = duckdb.connect(DB_PATH, read_only=True)
-          teams = con.execute("SELECT TEAM_ID, TEAM_ABBREVIATION AS TEAM_ABBR FROM teams").fetchdf()
-          con.close()
-
           try:
               standings = _fetch_standings_from_api(teams)
               standings.to_csv("data/processed/standings_cache.csv", index=False)
